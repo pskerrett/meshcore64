@@ -13,11 +13,6 @@ radio fw: mc64 1.17.1
 connected as 59800697 on Public
 f1 channels   f7 public
 
-alice: anyone around tonight?
-bob: just got home
-Public +3> _
-```
-
 ---
 
 ## Credit
@@ -37,11 +32,11 @@ for the Meshtastic network.
 
 **MeshCore 64 is a beta port of that hardware over to MeshCore — a
 complement to meshtastic64, not a replacement for it.** Same cartridge,
-same user port, same 600 baud; a different mesh on the other end. If you
+same user port, a different mesh on the other end. If you
 run Meshtastic, use meshtastic64 — it is the mature, original client for
 this board. This exists for people whose mesh is MeshCore.
 
-It is an independent, unofficial port and is not affiliated with or
+This is an independent, unofficial port and is not affiliated with or
 endorsed by bit-zeal. No code was copied from meshtastic64 (it is
 all-rights-reserved); only the general approach the hardware itself
 dictates — user port at 600 baud, and PETSCII conversion.
@@ -66,7 +61,7 @@ Not yet: contacts, direct messages, or repeater admin. Channels only.
 
 | | |
 |---|---|
-| A Commodore 64 | any model, real or emulated |
+| A Commodore 64 | any model, real not emulated |
 | bit-zeal's mesh modem cartridge | the Heltec V3 / ESP32-S3 board that carries the LoRa radio onto the user port |
 | The firmware image | `meshcore64-1.17.1-0679dbef-merged.bin` |
 | The program | `meshcore64.prg` |
@@ -128,12 +123,6 @@ the buffer and reassembles frames, so BASIC only ever sees whole messages.
 That single change took message latency from 3.4 seconds to 1.1, and kept
 it flat under load instead of drifting into minutes.
 
-**600 baud is the right speed.** Tested against 1200 and 2400: both are
-worse. The machine-code engine fixed how fast frames are *processed*, but
-the KERNAL still receives each bit by hand in an interrupt, and its timing
-margin shrinks as the rate climbs. At 1200 characters drop; at 2400 the
-link is effectively dead.
-
 **Messages are filtered for display, never for delivery.** The radio holds
 one queue shared by every channel, so a message for a channel you aren't
 watching still has to be collected — it's just not shown. Skipping it would
@@ -187,8 +176,7 @@ mean patching code unrelated to serial I/O.
   second on an idle mesh, longer on a busy one.
 - **The radio is chatty.** It reports *every* LoRa packet it overhears,
   whether or not it's addressed to you, and on a 600-baud link that's the
-  main reason a busy mesh feels slow. Left as-is to keep the firmware
-  stock.
+  main reason a busy mesh feels slow. 
 - **No scrollback.** Switching channels replays what you missed, but
   earlier history isn't kept.
 - **Channel slots can have gaps.** The channel list normally stops scanning
