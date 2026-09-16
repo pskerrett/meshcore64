@@ -18,28 +18,23 @@ f1 channels   f7 public
 ## Credit
 
 This project stands entirely on
-[**bit-zeal**](https://github.com/bit-zeal)'s work.
+[**bit-zeal**]
+(https://www.bit-zeal.com/product/meshtastic-64/LUH3CYQABMXQ5OMUJZTPFLJD?cp=true&sa=true&sbp=false&q=false) work.
 
-The **mesh modem cartridge** is bit-zeal's hardware. It is the thing that
-makes any of this possible — without that board there is no LoRa radio on
-the user port and no project here. MeshCore 64 is written specifically for
+The **mesh modem cartridge** is bit-zeal's hardware. It is what
+makes any of this possible. MeshCore 64 is written specifically for
 that cartridge and targets its wiring exactly.
 
-bit-zeal also wrote
+bit-zeal wrote the origional Meshtastic client for the C64
 [**meshtastic64**](https://github.com/bit-zeal/meshtastic64-commodore-64),
-the Commodore 64 client that made the cartridge useful in the first place,
-for the Meshtastic network.
 
-**MeshCore 64 is a beta port of that hardware over to MeshCore — a
-complement to meshtastic64, not a replacement for it.** Same cartridge,
-same user port, a different mesh on the other end. If you
+
+**MeshCore 64 is a beta port of that hardware over to MeshCore.
+It is theSame cartridge, but a different mesh on the other end. If you
 run Meshtastic, use meshtastic64 — it is the mature, original client for
-this board. This exists for people whose mesh is MeshCore.
+this board. This exists for people who want to try MeshCore.
 
-This is an independent, unofficial port and is not affiliated with or
-endorsed by bit-zeal. No code was copied from meshtastic64 (it is
-all-rights-reserved); only the general approach the hardware itself
-dictates — user port at 600 baud, and PETSCII conversion.
+This is an independent, unofficial port and is not affiliated with Jim_64. 
 
 ---
 
