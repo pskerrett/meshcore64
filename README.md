@@ -18,8 +18,7 @@ f1 channels   f7 public
 ## Credit
 
 This project stands entirely on
-[**bit-zeal**]
-(https://www.bit-zeal.com/product/meshtastic-64/LUH3CYQABMXQ5OMUJZTPFLJD?cp=true&sa=true&sbp=false&q=false) work.
+[**bit-zeal**]'s (https://www.bit-zeal.com/product/meshtastic-64/) work.
 
 The **mesh modem cartridge** is bit-zeal's hardware. It is what
 makes any of this possible. MeshCore 64 is written specifically for
