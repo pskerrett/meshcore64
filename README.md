@@ -151,6 +151,29 @@ the buffer and reassembles frames, so BASIC only ever sees whole messages.
 That single change took message latency from 3.4 seconds to 1.1, and kept
 it flat under load instead of drifting into minutes.
 
+**600 baud is the right rate — do not raise it.** Retested at 0.95b, after
+the machine-code work made rendering 6.6× faster, in case the earlier
+failures had been the C64 failing to keep up. They were not:
+
+| baud | syncs | sends | text |
+|---|---|---|---|
+| **600** | **54** | **2** | **clean** |
+| 1200 | 32 | 0 | corrupted — `Public` rendered as `ubic`, wrong channel at the wrong index |
+| 2400 | 1 | 0 | no channels found at all |
+
+600 delivers *more* than 1200: corrupted frames cost retries and
+mis-parses, so doubling the wire speed made the link slower in messages
+actually delivered. The limit is the C64's KERNAL, which samples every
+RS-232 bit by hand inside an interrupt — its timing margin shrinks as the
+rate climbs until jitter starts mis-sampling. Going faster would mean
+replacing that receiver outright (UP9600-style, driving the CIA shift
+register), a far bigger job than anything here.
+
+Worth knowing if you ever measure this yourself: at 1200 every *aggregate*
+number looked healthy — clean handshake, full channel scan, queue drained
+to zero — while the characters inside the frames were wrong. Frame counts
+tell you a payload parsed, not that its bytes were right.
+
 **Anything per-character belongs in machine code.** BASIC costs 20-56ms
 *per character*, so converting a single 40-character message between ASCII
 and the C64's character set took 2.3 seconds. That work happens in the
