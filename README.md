@@ -25,12 +25,12 @@ The **mesh modem cartridge** is bit-zeal's hardware. It is what
 makes any of this possible. MeshCore 64 is written specifically for
 that cartridge and targets its wiring exactly.
 
-bit-zeal wrote the origional Meshtastic client for the C64
-[**meshtastic64**](https://github.com/bit-zeal/meshtastic64-commodore-64),
+bit-zeal wrote the original Meshtastic client for the C64
+[**meshtastic64**](https://github.com/bit-zeal/meshtastic64-commodore-64).
 
 
 **MeshCore 64 is a beta port of that hardware over to MeshCore.
-It is theSame cartridge, but a different mesh on the other end. If you
+It is the same cartridge, but a different mesh on the other end. If you
 run Meshtastic, use meshtastic64 — it is the mature, original client for
 this board. This exists for people who want to try MeshCore.
 
