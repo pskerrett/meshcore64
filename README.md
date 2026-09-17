@@ -103,6 +103,30 @@ Either load `meshcore64.prg` the usual way, or put `meshcore64.crt` on a
 cartridge and it runs the moment you switch on — the mesh modem is on the
 user port, so the expansion port is free for it.
 
+### Building a cartridge
+
+The image is built for the simplest kind of C64 cartridge — a **plain 8K
+ROM cart mapped at $8000**, the same arrangement most commercial 8K game
+carts used:
+
+| | |
+|---|---|
+| ROM size | **8 KB** — a 2764 / 27C64 EPROM, or a 28C64 EEPROM |
+| Maps at | `$8000`–`$9FFF` |
+| `/EXROM` (edge pin 9) | **tied low** |
+| `/GAME` (edge pin 8) | **left high** — not connected |
+| Autostart | via the `CBM80` signature at `$8004`, already in the image |
+
+No bank switching, no glue logic, no GAL — just the EPROM, its address
+decoding, and those two control lines. Any off-the-shelf 8K C64 cartridge
+board should work as-is, and so will an EasyFlash or similar if you would
+rather not burn an EPROM.
+
+Burn `meshcore64-cart.bin` — the raw 8192 bytes. `meshcore64.crt` is the
+same contents wrapped in the header emulators expect, so use that one for
+VICE. The image is padded with `$FF`, which is also erased-EPROM state, so
+it burns cleanly.
+
 Keys: `F1` channels · `F7` Public · `F3` status · `r` (in the channel list)
 scan all 40 slots.
 
