@@ -12,8 +12,8 @@ header:
 	rem -d serial_baud_rate=600 wired to
 	rem the userport instead of usb.
 	rem
-	rem 0.92b: handshake, channel list
-	rem (f1) and per-channel chat. no
+	rem 0.95b: handshake, channel list
+	rem (f1), per-channel chat, cart leds.
 	rem contacts / direct messages yet.
 	rem ***********************************
 	:
@@ -34,16 +34,51 @@ initialize:
 	rem parser died with "bad subscript" the moment a payload reached
 	rem byte 11. (im$(9) hid the same bug, because the default 11
 	rem elements happened to be enough for it.)
+	rem **startup light show - the ONE thing allowed before the OPEN.**
+	rem all six lamps sweep here, pb1/pb2 included, because the rs-232
+	rem link does not exist yet: rts and dtr are ours to borrow until the
+	rem kernal claims them. the open below takes them back, and from then
+	rem on we only ever drive the four safe lamps (pb3-pb6) -- driving rts
+	rem low once the link is up tells the peer to stop sending and kills
+	rem reception stone dead.
+	rem this is allowed above the open only because the implicit CLR wipes
+	rem zv/zs/zj/zd and nothing here is needed afterwards. do NOT put
+	rem anything above the open that has to survive it.
+	print"{lower}" : print"{clear}{white}meshcore 64  0.95b"
+	poke 56579,126 : zv = 2 : zs = 2
+	for zj = 1 to 24
+	poke 56577, zv
+	if zv = 64 then zs = 0.5
+	if zv = 2 then zs = 2
+	zv = zv * zs
+	for zd = 1 to 18 : next zd
+	next zj
+	poke 56577,0 : poke 56579,120 : rem lamps off, rts/dtr handed back
 	open 2,2,3,chr$(7) : rem userport rs232 @ 600 baud
 	rem **machine-language serial engine**
 	rem basic needs ~50ms per received byte (get# alone benchmarks at
 	rem 52ms), but at 600 baud a byte lands every 16.7ms -- a 3x deficit
-	rem no amount of basic tuning can close. this 113-byte routine at
+	rem no amount of basic tuning can close. this 217-byte routine at
 	rem $c000 drains the kernal buffer and assembles frames in ~50 cycles
-	rem per byte instead, so basic only ever sees completed frames.
-	for zi = 0 to 112 : read zd : poke 49152 + zi, zd : next zi
+	rem per byte instead, so basic only ever sees completed frames. it
+	rem also steps the cartridge led animations (see below).
+	for zi = 0 to 216 : read zd : poke 49152 + zi, zd : next zi
 	get#2, rb$ : rem one arming call: the chkin that starts the receiver
 	poke 52992,0 : poke 52995,0 : rem ml STATE=0, READY=0
+	rem **cartridge leds, driven by the ml routine.**
+	rem four leds on user port pb3-pb6 ($dd01 = 56577, direction $dd03 =
+	rem 56579; 120 = %01111000). pb1/pb2 are the c64's rs-232 RTS and DTR
+	rem outputs and are deliberately left to the kernal -- driving rts low
+	rem tells the peer to stop sending and kills reception stone dead
+	rem (confirmed in vice: transmit carried on, receive stopped the
+	rem instant the first animation started). pb0/rxd stays an input too.
+	rem the cart has six leds; we drive the four that are safe. basic
+	rem only ever pokes a pattern index + a go flag, once per event -- the
+	rem ml steps the animation, because a poke costs ~7ms interpreted and
+	rem per-loop animation in basic would eat 3-20% of the main loop.
+	rem   52997 ($cf05) = pattern running flag   52998 ($cf06) = step index
+	rem   index 0 = rx ripple, index 5 = tx flash
+	poke 52997,0 : poke 56579,120 : poke 56577,0 : rem leds dark
 	dim im$(9)
 	rem ch$() caches the radio's channel names, indexed by the same
 	rem channel_idx the protocol uses; "" means empty-or-not-yet-scanned.
@@ -63,8 +98,11 @@ initialize:
 	rem bk$ = cursor-lefts, sp$ = spaces. used to back up over the prompt
 	rem and overwrite it, so an incoming message can reuse the prompt's
 	rem own screen row instead of leaving it blank above every message.
-	bk$ = "" : sp$ = ""
-	for zi = 1 to 80 : bk$ = bk$ + chr$(157) : sp$ = sp$ + " " : next zi
+	rem doubling, not 80 concatenations: 5 jiffies instead of 66, and it
+	rem leaves far less litter on the string heap. 7 doublings = 128 chars,
+	rem comfortably over the 80 we ever use.
+	bk$ = chr$(157) : sp$ = " "
+	for zi = 1 to 7 : bk$ = bk$ + bk$ : sp$ = sp$ + sp$ : next zi
 	rem frame payload goes in a NUMERIC array, not a growing string.
 	rem the old "fb$ = fb$ + chr$(rv)" allocated a brand-new string for
 	rem every payload byte, littering basic's string heap until the
@@ -73,10 +111,10 @@ initialize:
 	rem message take ~30s to appear. an array store costs nothing and
 	rem creates no garbage. it also skips pointless work: device_info
 	rem is 82 bytes we never even read.
-	hs = 0 : im = 0 : og$ = "" : lt = ti
+	hs = 0 : im = 0 : og$ = "" : oa$ = "" : ez = 0 : lt = ti
 	cc = 0 : co = 0 : ck = 0 : ut = 0 : cf = 0 : ht = 0 : pr$ = "> " : rem channel, prev, cached, unread, sweep, history, prompt
-	print"{lower}" : rem #lowercase only affects the compiler; this engages it on-screen
-	print"{clear}{white}meshcore 64  0.92b"
+	rem (title already on screen from before the open; CLR wipes variables,
+	rem not the display)
 	print"arming rs232 receiver..."
 	tw = ti + 120 : rem ~2 second settle delay -- known c64 kernal rs232
 	armWait: if ti < tw then goto armWait : rem quirk: bytes right after
@@ -215,7 +253,7 @@ rxDeviceInfo:
 	rem paired with. layout: op,fw_ver_code,max_contacts/2,
 	rem max_group_channels,ble_pin(4),build_date(12),manufacturer(40),
 	rem fw_version(20 @ offset 60),repeat_en,path_hash_mode
-	ps = 60 : pe = 79 : gosub ext : gosub trimz : i$ = o$ : gosub a2p : fw$ = o$
+	ez = 1 : eb = 52480 : ps = 60 : pe = 79 : gosub ext : fw$ = i$ : ez = 0
 	hs = 2
 	return
 	:
@@ -225,7 +263,7 @@ rxDeviceInfo:
 rxSelfInfo:
 #lineskip 500
 	rem **resp_code_self_info - grab our node name (offset 58..)**
-	ps = 58 : pe = fl - 1 : gosub ext : gosub a2p : nn$ = o$
+	eb = 52480 : ps = 58 : pe = fl - 1 : gosub ext : nn$ = i$
 	hs = 1
 	return
 	:
@@ -237,13 +275,13 @@ rxChannelInfo:
 	rem **resp_code_channel_info - cache this channel's name**
 	rem layout: op, channel_idx, name(32, null-padded), secret(16)
 	cv = peek(52737) : rem channel_idx at payload byte 1
-	ps = 2 : pe = 33 : gosub ext : gosub trimz : i$ = o$ : gosub a2p
-	if cv < 40 then ch$(cv) = o$
+	ez = 1 : eb = 52480 : ps = 2 : pe = 33 : gosub ext : ez = 0
+	if cv < 40 then ch$(cv) = i$
 	cw = 1 : rem tell chanScan that a reply landed
 	rem only the FIRST reply (channel 0, during the handshake) advances
 	rem the handshake stage. without this guard every reply from a later
 	rem chanScan sweep would re-trigger stage 3 and confuse waitStage.
-	if hs < 3 then cn$ = o$ : hs = 3
+	if hs < 3 then cn$ = i$ : hs = 3 : rem i$, not o$ -- trimz/a2p are gone
 	return
 	:
 	:
@@ -252,7 +290,7 @@ rxChannelInfo:
 rxCurrTime:
 #lineskip 500
 	rem **resp_code_curr_time - remember device clock + our jiffy count**
-	ps = 1 : pe = 4 : gosub ext : b4$ = i$ : gosub decU32
+	eb = 52736 : ps = 1 : pe = 4 : gosub ext : b4$ = i$ : gosub decU32
 	bt = uv : bj = ti
 	hs = 4
 	return
@@ -269,6 +307,9 @@ rxChanMsg:
 	rem 4, so filtering to the current channel costs one peek and no
 	rem extra traffic at all.
 	mc = peek(52740)
+	rem bling on ANY incoming message, whatever channel it belongs to --
+	rem this is "the mesh is talking", not "this is for you".
+	poke 52998,0 : poke 52997,1
 	if mc <> cc then goto rxChanOther
 	rem **our channel: extract, convert, queue. costs nothing extra.**
 	rem deliberately identical to the pre-history build. a message for
@@ -276,12 +317,12 @@ rxChanMsg:
 	rem later -- replay only ever shows UNREAD messages, and by
 	rem definition nothing on the current channel is unread. so it is
 	rem never stored, and this path pays nothing for the history feature.
-	ps = 11 : pe = fl - 1 : gosub ext : gosub a2p
+	eb = 52480 : ps = 11 : pe = fl - 1 : gosub ext
 	rem no channel-name prefix here. the firmware already prepends
 	rem "<sender>: " into the text itself -- basechatmesh.cpp's
 	rem sendGroupMessage() does sprintf(&temp[5], "%s: ", sender_name)
 	rem -- so the old cn$ + ": " + o$ printed "public: alice: hi".
-	if im < 10 then im$(im) = o$ : im = im + 1
+	if im < 10 then im$(im) = i$ : im = im + 1
 	goto rxChanDrain
 	rxChanOther:
 	rem **another channel: count it and keep a short copy for replay.**
@@ -290,11 +331,11 @@ rxChanMsg:
 	rem  - only the first 40 characters (one screen line). the ext loop
 	rem    dominates the per-message cost and scales with length, so a
 	rem    150-char message would otherwise be ~4x the work.
-	rem  - store the RAW text and run a2p at replay time. most stored
-	rem    messages are never read back (the ring rolls over, or you
-	rem    never visit that channel), so converting on arrival is work
-	rem    thrown away.
-	ps = 11 : pe = fl - 1
+	rem  - the text is ALREADY petscii, converted by the ml the moment
+	rem    the frame landed, so storing and replaying are both cheap.
+	rem    the previous build deferred a basic a2p to replay time, which
+	rem    turned a channel switch with 4 unread into a ~10s freeze.
+	eb = 52480 : ps = 11 : pe = fl - 1
 	if pe > ps + 39 then pe = ps + 39
 	gosub ext
 	zs = ht - 24*int(ht/24)
@@ -380,7 +421,7 @@ readKeyboard:
 #lineskip 500
 	rem **poll keyboard: typing / backspace / send / f1 / f7 / f3=debug**
 	get a$ : if a$ = "" then return
-	if a$ = chr$(13) then gosub sendChatMsg : og$ = "" : print"{13}";pr$; : return
+	if a$ = chr$(13) then gosub sendChatMsg : og$ = "" : oa$ = "" : print"{13}";pr$; : return
 	if a$ = chr$(20) then gosub deleteKey : return
 	rem the function keys MUST be caught here, before the printable test
 	rem below: f1/f3/f7 are chr$(133)/(134)/(136), which all fall inside
@@ -390,7 +431,16 @@ readKeyboard:
 	if a$ = "{f7}" then cc = 0 : gosub setChan : return
 	if a$ = "{f3}" then print"{13}hs=";hs;" cc=";cc;" fl=";fl;" im=";im;"{13}nn=";nn$;" cn=";cn$;"{13}";pr$;og$; : return
 	za = asc(a$) : if za < 32 or za > 218 then return : rem drop ctrl/colour/fn keys
-	og$ = og$ + a$ : print a$; : return
+	rem keep TWO copies of the typed line: og$ in petscii for the screen,
+	rem oa$ in ascii for the wire. converting one character here costs a
+	rem few ops and is invisible between keystrokes; the old code ran a
+	rem whole p2a loop at send time instead, which froze for 1.74s on a
+	rem 40-character message before a single byte went out.
+	og$ = og$ + a$ : print a$;
+	zc = za
+	if za > 64 and za < 91 then zc = za + 32
+	if za > 192 and za < 219 then zc = za - 128
+	oa$ = oa$ + chr$(zc) : return
 	:
 	:
 
@@ -400,6 +450,7 @@ deleteKey:
 	rem **backspace in the typed line**
 	if og$ = "" then return
 	og$ = left$(og$, len(og$)-1)
+	oa$ = left$(oa$, len(oa$)-1) : rem keep the wire copy in step
 	print chr$(20);
 	return
 	:
@@ -411,9 +462,9 @@ sendChatMsg:
 	rem **cmd_send_channel_txt_msg on the currently selected channel**
 	if og$ = "" then return
 	uv = bt + int((ti - bj) / 60) : gosub encU32 : rem estimate device clock
-	i$ = og$ : gosub p2a
-	pl$ = chr$(3) + chr$(0) + chr$(cc) + e$ + o$
+	pl$ = chr$(3) + chr$(0) + chr$(cc) + e$ + oa$
 	rem opcode, txt_type=plain, channel_idx=cc, timestamp(4), text
+	poke 52998,5 : poke 52997,1 : rem all four leds, in unison
 	gosub sendFrame
 	return
 	:
@@ -462,80 +513,33 @@ decU32:
 
 ext:
 #lineskip 500
-	rem **build i$ from frame payload bytes fb(ps) .. fb(pe)**
+	rem **build i$ from payload bytes ps..pe of the buffer at eb**
+	rem eb = 52736 ($ce00) RAW bytes - opcodes, channel indexes, timestamps
+	rem eb = 52480 ($cd00) TEXT - the ml has already converted ascii to
+	rem petscii there. the old basic converter (a2p) cost ~56ms PER
+	rem CHARACTER, i.e. 2.3s for a 40-char message, so it is gone from
+	rem every text path.
 	rem only the few short fields we actually parse get turned into
 	rem strings (node name, channel name, timestamp, message text), so
 	rem the string churn here is trivial next to the old approach of
 	rem concatenating every single payload byte as it arrived.
+	rem ez = 1 stops at the first null instead of building the whole
+	rem fixed-width field and then scanning it. that pairs with the ml
+	rem preserving 0 as 0, and replaces trimz entirely: a 32-byte channel
+	rem name cost 0.45s to trim in basic on top of 0.67s to build.
+	rem note zi is set to pe rather than jumping out of the loop -- an
+	rem early exit from a FOR leaks a stack frame on this machine.
 	i$ = ""
 	if pe > fl - 1 then pe = fl - 1 : rem never read past the payload
 	rem note: a c64 for-loop always runs its body at least once, even
 	rem when the limit is below the start -- so guard empty ranges.
 	if pe < ps then return
 	for zi = ps to pe
-	i$ = i$ + chr$(peek(52736 + zi))
+	zb = peek(eb + zi)
+	if zb = 0 and ez = 1 then zi = pe : goto extNext
+	i$ = i$ + chr$(zb)
+	extNext:
 	next zi
-	return
-	:
-	:
-
-
-a2p:
-#lineskip 500
-	rem **wire ascii -> screen petscii, i$ -> o$**
-	o$ = ""
-	rem guard the empty string: a c64 for-loop always runs its body at
-	rem least once, so len(i$)=0 would evaluate mid$(i$,1,1) = "" and
-	rem then asc("") -> ?illegal quantity error. empty strings reach
-	rem here now that unconfigured channel slots (all-null names) get
-	rem trimmed to "" by trimz.
-	if i$ = "" then return
-	for zi = 1 to len(i$)
-	rem default to '.' so control codes never reach the screen: petscii
-	rem colour codes (5, 28-31, 144-159) and other controls would
-	rem otherwise be printed literally and repaint the display.
-	z$ = mid$(i$,zi,1) : za = asc(z$) : zc$ = "."
-	if za > 31 and za < 127 then zc$ = z$
-	if za > 64 and za < 91 then zc$ = chr$(za+128)
-	if za > 96 and za < 123 then zc$ = chr$(za-32)
-	o$ = o$ + zc$
-	next zi
-	return
-	:
-	:
-
-
-p2a:
-#lineskip 500
-	rem **screen petscii -> wire ascii, i$ -> o$**
-	o$ = ""
-	if i$ = "" then return : rem see the note in a2p
-	for zi = 1 to len(i$)
-	z$ = mid$(i$,zi,1) : za = asc(z$) : zc$ = z$
-	if za > 64 and za < 91 then zc$ = chr$(za+32)
-	if za > 192 and za < 219 then zc$ = chr$(za-128)
-	o$ = o$ + zc$
-	next zi
-	return
-	:
-	:
-
-
-trimz:
-#lineskip 500
-	rem **truncate i$ at its first chr$(0), result -> o$**
-	rem note: never RETURN from inside the FOR loop below -- doing so
-	rem leaks a for/next stack frame every call (classic c64 basic
-	rem gotcha: the shared gosub/for-next stack only reclaims a loop's
-	rem frame when its NEXT actually runs to completion), which
-	rem eventually corrupts the stack and crashes with an unrelated
-	rem "return without gosub" error elsewhere.
-	tz = 0 : rem tz = 1-based index of first chr$(0), 0 = not found
-	for zi = 1 to len(i$)
-	if mid$(i$,zi,1) = chr$(0) and tz = 0 then tz = zi
-	next zi
-	if tz = 0 then o$ = i$ : return
-	o$ = left$(i$,tz-1)
 	return
 	:
 	:
@@ -616,7 +620,7 @@ replayChan:
 	rw = cu(cc) : if rw > rn then rw = rn
 	if rw = 0 then return
 	for zj = rn - rw to rn - 1
-	i$ = hm$(rp(zj)) : gosub a2p : print o$
+	print hm$(rp(zj))
 	next zj
 	return
 	:
@@ -758,11 +762,17 @@ chanPicker:
 mldata:
 #lineskip 500
 	rem machine code for the $c000 serial engine
-	data 173,3,207,208,107,172,156,2,204,155,2,240,99,177,247,238
-	data 156,2,174,0,207,240,36,202,240,44,202,240,51,174,2,207
-	data 157,0,206,238,2,207,232,236,1,207,144,217,169,1,141,3
-	data 207,238,4,207,169,0,141,0,207,240,53,201,62,208,198,169
-	data 1,141,0,207,208,191,141,1,207,169,2,141,0,207,208,181
-	data 201,0,208,21,173,1,207,240,16,201,177,176,12,169,0,141
-	data 2,207,169,3,141,0,207,208,156,169,0,141,0,207,240,149
-	data 96
+	data 173,3,207,208,110,172,156,2,204,155,2,240,102,177,247,238
+	data 156,2,174,0,207,240,39,202,240,47,202,240,54,174,2,207
+	data 157,0,206,238,2,207,232,236,1,207,144,217,32,152,192,169
+	data 1,141,3,207,238,4,207,169,0,141,0,207,240,53,201,62
+	data 208,195,169,1,141,0,207,208,188,141,1,207,169,2,141,0
+	data 207,208,178,201,0,208,21,173,1,207,240,16,201,177,176,12
+	data 169,0,141,2,207,169,3,141,0,207,208,153,169,0,141,0
+	data 207,240,146,173,5,207,240,22,169,120,141,3,221,174,6,207
+	data 189,205,192,201,255,240,8,141,1,221,232,142,6,207,96,169
+	data 0,141,5,207,141,1,221,96,162,0,236,1,207,176,41,189
+	data 0,206,240,30,201,32,144,33,201,127,176,29,201,65,144,18
+	data 201,91,144,12,201,97,144,10,201,123,176,6,41,223,208,2
+	data 9,128,157,0,205,232,208,210,96,169,46,208,245,48,72,48
+	data 0,255,120,120,0,120,120,0,255

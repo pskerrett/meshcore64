@@ -8,17 +8,18 @@ brings a LoRa radio onto the C64 user port. The C64 talks to the radio over
 that port at 600 baud.
 
 ```
-meshcore 64  0.92b
+meshcore 64  0.95b
 radio fw: mc64 1.17.1
 connected as 59800697 on Public
 f1 channels   f7 public
+```
 
 ---
 
 ## Credit
 
 This project stands entirely on
-[**bit-zeal**]'s (https://www.bit-zeal.com/s/shop) work.
+[**bit-zeal**](https://www.bit-zeal.com/s/shop)'s work.
 
 The **mesh modem cartridge** is bit-zeal's hardware. It is what
 makes any of this possible. MeshCore 64 is written specifically for
@@ -46,6 +47,8 @@ This is an independent, unofficial port and is not affiliated with Jim_64.
   jumps straight back to Public.
 - **Tells you what you're missing.** `Public +3>` means 3 messages are
   waiting on other channels. Switch to one and they're replayed.
+- **Lights up the cartridge.** All six lamps sweep at startup, then a
+  ripple on every incoming message and a flash when you send.
 
 Not yet: contacts, direct messages, or repeater admin. Channels only.
 
@@ -58,7 +61,7 @@ Not yet: contacts, direct messages, or repeater admin. Channels only.
 | A Commodore 64 | any model, real not emulated |
 | bit-zeal's mesh modem cartridge | the Heltec V3 / ESP32-S3 board that carries the LoRa radio onto the user port |
 | The firmware image | `meshcore64-1.17.1-0679dbef-merged.bin` |
-| The program | `meshcore64.prg` |
+| The program | `meshcore64.prg` to load, or `meshcore64.crt` to run from a cartridge |
 
 ---
 
@@ -94,10 +97,17 @@ frequency, the C64 will connect happily and simply never hear anything.
 is already on the radio — it doesn't create channels.
 
 **4. Seat the board in the cartridge**, plug the cart into the C64, and
-load the program. It connects on its own.
+start the program. It connects on its own.
+
+Either load `meshcore64.prg` the usual way, or put `meshcore64.crt` on a
+cartridge and it runs the moment you switch on — the mesh modem is on the
+user port, so the expansion port is free for it.
 
 Keys: `F1` channels · `F7` Public · `F3` status · `r` (in the channel list)
 scan all 40 slots.
+
+If the cartridge lamps look inverted — one dark lamp sweeping rather than
+one lit — the LEDs are wired active-low, and the patterns need flipping.
 
 ---
 
@@ -116,6 +126,13 @@ amount of BASIC tuning closes. A 113-byte 6502 routine at `$C000` drains
 the buffer and reassembles frames, so BASIC only ever sees whole messages.
 That single change took message latency from 3.4 seconds to 1.1, and kept
 it flat under load instead of drifting into minutes.
+
+**Anything per-character belongs in machine code.** BASIC costs 20-56ms
+*per character*, so converting a single 40-character message between ASCII
+and the C64's character set took 2.3 seconds. That work happens in the
+machine-code routine now, in about a millisecond. It is why messages
+render quickly, why switching channels no longer freezes, and why pressing
+RETURN sends immediately instead of pausing first.
 
 **Messages are filtered for display, never for delivery.** The radio holds
 one queue shared by every channel, so a message for a channel you aren't
