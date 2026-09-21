@@ -8,7 +8,7 @@ brings a LoRa radio onto the C64 user port. The C64 talks to the radio over
 that port at 600 baud.
 
 ```
-meshcore 64  0.95b
+meshcore 64  1.0
 radio fw: mc64 1.17.1
 connected as 59800697 on Public
 f1 channels   f7 public
@@ -29,7 +29,7 @@ bit-zeal wrote the original Meshtastic client for the C64
 [**meshtastic64**](https://github.com/bit-zeal/meshtastic64-commodore-64).
 
 
-**MeshCore 64 is a beta port of that hardware over to MeshCore.
+**MeshCore 64 is a port of that hardware over to MeshCore.
 It is the same cartridge, but a different mesh on the other end. If you
 run Meshtastic, use meshtastic64 — it is the mature, original client for
 this board. This exists for people who want to try MeshCore.
@@ -61,7 +61,7 @@ Not yet: contacts, direct messages, or repeater admin. Channels only.
 | A Commodore 64 | any model, real not emulated |
 | bit-zeal's mesh modem cartridge | the Heltec V3 / ESP32-S3 board that carries the LoRa radio onto the user port |
 | The firmware image | `meshcore64-1.17.1-0679dbef-merged.bin` |
-| The program | `meshcore64.prg` to load, or `meshcore64.crt` to run from a cartridge |
+| The program | `meshcore64.prg`, `meshcore64.d64` (disk), or `meshcore64.crt` (cartridge) |
 
 ---
 
@@ -99,7 +99,10 @@ is already on the radio — it doesn't create channels.
 **4. Seat the board in the cartridge**, plug the cart into the C64, and
 start the program. It connects on its own.
 
-Either load `meshcore64.prg` the usual way, or put `meshcore64.crt` on a
+Three ways to run it. Load `meshcore64.prg` the usual way; or put
+`meshcore64.d64` on a disk and `LOAD"MESHCORE64",8` (the disk also carries
+`MC64.SMALL`, the same program with comments stripped, which loads in
+about a third of the time on a real 1541); or put `meshcore64.crt` on a
 cartridge and it runs the moment you switch on — the mesh modem is on the
 user port, so the expansion port is free for it.
 
@@ -151,7 +154,7 @@ the buffer and reassembles frames, so BASIC only ever sees whole messages.
 That single change took message latency from 3.4 seconds to 1.1, and kept
 it flat under load instead of drifting into minutes.
 
-**600 baud is the right rate — do not raise it.** Retested at 0.95b, after
+**600 baud is the right rate — do not raise it.** Retested at 1.0, after
 the machine-code work made rendering 6.6× faster, in case the earlier
 failures had been the C64 failing to keep up. They were not:
 

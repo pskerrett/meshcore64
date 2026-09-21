@@ -12,7 +12,7 @@ header:
 	rem -d serial_baud_rate=600 wired to
 	rem the userport instead of usb.
 	rem
-	rem 0.95b: handshake, channel list
+	rem 1.0: handshake, channel list
 	rem (f1), per-channel chat, cart leds.
 	rem contacts / direct messages yet.
 	rem ***********************************
@@ -44,7 +44,7 @@ initialize:
 	rem this is allowed above the open only because the implicit CLR wipes
 	rem zv/zs/zj/zd and nothing here is needed afterwards. do NOT put
 	rem anything above the open that has to survive it.
-	print"{lower}" : print"{clear}{white}meshcore 64  0.95b"
+	print"{lower}" : print"{clear}{white}meshcore 64  1.0"
 	poke 56579,126 : zv = 2 : zs = 2
 	for zj = 1 to 24
 	poke 56577, zv
