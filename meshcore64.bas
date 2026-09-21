@@ -12,7 +12,7 @@ header:
 	rem -d serial_baud_rate=600 wired to
 	rem the userport instead of usb.
 	rem
-	rem 1.0: handshake, channel list
+	rem 1.1b: handshake, channel list
 	rem (f1), per-channel chat, cart leds.
 	rem contacts / direct messages yet.
 	rem ***********************************
@@ -44,7 +44,8 @@ initialize:
 	rem this is allowed above the open only because the implicit CLR wipes
 	rem zv/zs/zj/zd and nothing here is needed afterwards. do NOT put
 	rem anything above the open that has to survive it.
-	print"{lower}" : print"{clear}{white}meshcore 64  1.0"
+	print"{lower}" : print"{clear}{white}MeshCore 64   v1.1b"
+	print"------------------------------------"
 	poke 56579,126 : zv = 2 : zs = 2
 	for zj = 1 to 24
 	poke 56577, zv
@@ -58,11 +59,11 @@ initialize:
 	rem **machine-language serial engine**
 	rem basic needs ~50ms per received byte (get# alone benchmarks at
 	rem 52ms), but at 600 baud a byte lands every 16.7ms -- a 3x deficit
-	rem no amount of basic tuning can close. this 217-byte routine at
+	rem no amount of basic tuning can close. this 305-byte routine at
 	rem $c000 drains the kernal buffer and assembles frames in ~50 cycles
 	rem per byte instead, so basic only ever sees completed frames. it
 	rem also steps the cartridge led animations (see below).
-	for zi = 0 to 216 : read zd : poke 49152 + zi, zd : next zi
+	for zi = 0 to 304 : read zd : poke 49152 + zi, zd : next zi
 	get#2, rb$ : rem one arming call: the chkin that starts the receiver
 	poke 52992,0 : poke 52995,0 : rem ml STATE=0, READY=0
 	rem **cartridge leds, driven by the ml routine.**
@@ -112,19 +113,33 @@ initialize:
 	rem creates no garbage. it also skips pointless work: device_info
 	rem is 82 bytes we never even read.
 	hs = 0 : im = 0 : og$ = "" : oa$ = "" : ez = 0 : lt = ti
-	cc = 0 : co = 0 : ck = 0 : ut = 0 : cf = 0 : ht = 0 : pr$ = "> " : rem channel, prev, cached, unread, sweep, history, prompt
+	ru = 0 : uk = 0 : sn = 0 : sc = 0 : sm = 0 : sb = 0 : sq = 0 : cc = 0 : co = 0 : ck = 0 : ut = 0 : cf = 0 : ht = 0 : pr$ = "> " : rem channel, prev, cached, unread, sweep, history, prompt
 	rem (title already on screen from before the open; CLR wipes variables,
 	rem not the display)
-	print"arming rs232 receiver..."
+	gosub reuDetect
+	rem uk is in kb and a screen snapshot is exactly 1kb, so the slot
+	rem count is uk -- less one, reserved to park the live screen while
+	rem you are scrolling.
+	if ru = 1 then sm = uk - 1
+	rem str$ of a positive number carries a leading space, hence mid$
+	if ru = 1 then print"REU ";mid$(str$(uk),2);"K - F5 scrollback ready"
+	if ru = 0 then print"No REU - scrollback disabled"
+	print"Arming RS-232..."
 	tw = ti + 120 : rem ~2 second settle delay -- known c64 kernal rs232
 	armWait: if ti < tw then goto armWait : rem quirk: bytes right after
 	rem open can be lost/corrupted before the nmi-driven receiver is
 	rem fully armed; give it a moment before trusting the link.
-	print"connecting..."
+	print"Connecting..."
 	gosub connect
-	print"{13}connected as ";nn$;" on ";cn$
-	print"radio fw: ";fw$
-	print"f1 channels   f7 public"
+	print"{13}Connected as ";nn$;" on ";cn$
+	print"Radio fw: ";fw$
+	print
+	rem only offer f5 if there is actually an REU to scroll back into --
+	rem the key handler already no-ops without one, but advertising a key
+	rem that does nothing is worse than not mentioning it.
+	if ru = 1 then print"F1 Channels   F5 Back   F7 Public"
+	if ru = 0 then print"F1 Channels   F7 Public"
+	print
 	gosub setPrompt
 	rem kick off a drain of anything already sitting in the radio's
 	rem offline queue (messages that arrived before we connected, or
@@ -263,7 +278,7 @@ rxDeviceInfo:
 rxSelfInfo:
 #lineskip 500
 	rem **resp_code_self_info - grab our node name (offset 58..)**
-	eb = 52480 : ps = 58 : pe = fl - 1 : gosub ext : nn$ = i$
+	eb = 52480 : ps = 58 : pe = peek(52999) - 1 : gosub ext : nn$ = i$
 	hs = 1
 	return
 	:
@@ -317,7 +332,7 @@ rxChanMsg:
 	rem later -- replay only ever shows UNREAD messages, and by
 	rem definition nothing on the current channel is unread. so it is
 	rem never stored, and this path pays nothing for the history feature.
-	eb = 52480 : ps = 11 : pe = fl - 1 : gosub ext
+	eb = 52480 : ps = 11 : pe = peek(52999) - 1 : gosub ext
 	rem no channel-name prefix here. the firmware already prepends
 	rem "<sender>: " into the text itself -- basechatmesh.cpp's
 	rem sendGroupMessage() does sprintf(&temp[5], "%s: ", sender_name)
@@ -335,7 +350,7 @@ rxChanMsg:
 	rem    the frame landed, so storing and replaying are both cheap.
 	rem    the previous build deferred a basic a2p to replay time, which
 	rem    turned a channel switch with 4 unread into a ~10s freeze.
-	eb = 52480 : ps = 11 : pe = fl - 1
+	eb = 52480 : ps = 11 : pe = peek(52999) - 1
 	if pe > ps + 39 then pe = ps + 39
 	gosub ext
 	zs = ht - 24*int(ht/24)
@@ -349,7 +364,9 @@ rxChanMsg:
 	if mc < 40 then cu(mc) = cu(mc) + 1
 	ut = ut + 1
 	gosub setPrompt
-	print chr$(13);chr$(145);pr$;og$;
+	rem while a scrollback page is on screen, count the message but do
+	rem NOT repaint -- the view belongs to the snapshot, not to us.
+	if sb = 0 then print chr$(13);chr$(145);pr$;og$;
 	rxChanDrain:
 	rem **keep draining the radio's offline queue.**
 	rem cmd_sync_next_message returns exactly ONE message, and the
@@ -412,6 +429,14 @@ printQueued:
 	if len(dq$) < zl then print left$(sp$,zl-len(dq$));
 	print
 	print pr$;og$;
+	rem **one snapshot per SCREENFUL, not per message.**
+	rem consecutive screens overlap by 24 of 25 lines, so snapshotting
+	rem every message stored the same content 18 times over and made f5
+	rem step back by a single line. counting messages instead means one
+	rem press = one genuinely new page, and the same reu holds ~18x more
+	rem history (a 512k unit: ~9000 messages rather than ~500).
+	sq = sq + 1
+	if sq >= 18 then sq = 0 : gosub reuSave
 	return
 	:
 	:
@@ -428,6 +453,7 @@ readKeyboard:
 	rem the 32..218 "printable" range and would otherwise be appended to
 	rem the typed line as garbage.
 	if a$ = "{f1}" then gosub chanPicker : return
+	if a$ = "{f5}" then gosub scrollBack : return
 	if a$ = "{f7}" then cc = 0 : gosub setChan : return
 	if a$ = "{f3}" then print"{13}hs=";hs;" cc=";cc;" fl=";fl;" im=";im;"{13}nn=";nn$;" cn=";cn$;"{13}";pr$;og$; : return
 	za = asc(a$) : if za < 32 or za > 218 then return : rem drop ctrl/colour/fn keys
@@ -515,6 +541,9 @@ ext:
 #lineskip 500
 	rem **build i$ from payload bytes ps..pe of the buffer at eb**
 	rem eb = 52736 ($ce00) RAW bytes - opcodes, channel indexes, timestamps
+	rem NOTE for text: use peek(52999) (CLEN), not fl, for the end offset.
+	rem the converted copy is SHORTER than the raw frame whenever a 3-byte
+	rem utf-8 sequence collapsed to one character.
 	rem eb = 52480 ($cd00) TEXT - the ml has already converted ascii to
 	rem petscii there. the old basic converter (a2p) cost ~56ms PER
 	rem CHARACTER, i.e. 2.3s for a 40-char message, so it is gone from
@@ -704,10 +733,10 @@ chanPicker:
 	rem *** so "messages are paused" here means paused from the DISPLAY
 	rem *** only: the ml engine and handleFrame run throughout, incoming
 	rem *** messages queue up, and they print when we return.
-	print"{clear}{white}channels"
+	print"{clear}{white}Channels"
 	print
 	if ck = 1 then goto chanShow
-	print"scanning..."
+	print"Scanning..."
 	gosub chanScan
 	chanShow:
 	rem build the menu: map digits 0-9 onto whatever channel indexes
@@ -716,9 +745,9 @@ chanPicker:
 	for zi = 0 to 39
 	if ch$(zi) <> "" and np < 10 then pk(np) = zi : np = np + 1
 	next zi
-	print"{clear}{white}channels"
+	print"{clear}{white}Channels"
 	print
-	if np = 0 then print"none found" : goto chanPickLoop
+	if np = 0 then print"None found" : goto chanPickLoop
 	for zi = 0 to np - 1
 	print" ";chr$(48+zi);"  ";left$(ch$(pk(zi)),18);
 	rem unread count per channel -- this is where you actually look to
@@ -728,7 +757,7 @@ chanPicker:
 	print
 	next zi
 	print
-	print"0-";chr$(48+np-1);" select   r all   f1 cancel"
+	print"0-";chr$(48+np-1);" Select   R Rescan   F1 Cancel"
 	chanPickLoop:
 	gosub readFrame : rem keep draining -- see the warning above
 	get a$ : if a$ = "" then goto chanPickLoop
@@ -745,9 +774,9 @@ chanPicker:
 	rem slots in a row, which misses a channel sitting above a gap. this
 	rem is the deliberate ~39s option for that case: names appear as they
 	rem arrive, so you can pick yours the moment you see it.
-	print"{clear}{white}channels"
+	print"{clear}{white}Channels"
 	print
-	print"scanning all 40 - about 40 seconds"
+	print"Scanning all 40 - about 40 seconds"
 	print
 	cf = 1 : gosub chanScan : cf = 0
 	goto chanShow
@@ -759,20 +788,206 @@ chanPicker:
 	:
 
 
+reuBlk:
+#lineskip 500
+	rem **point the REC at screen ram <-> snapshot slot sl**
+	rem a snapshot is the 1000 bytes of screen ram at $0400. slots are
+	rem 1k apart so the low byte of the reu address is always zero:
+	rem   hi   = (slot mod 64) * 4
+	rem   bank = slot / 64
+	rem the caller then writes 144 (stash) or 145 (fetch) to $df01.
+	poke 57090,0 : poke 57091,4 : rem c64 $0400
+	poke 57092,0
+	poke 57093,(sl and 63) * 4
+	poke 57094,int(sl / 64)
+	poke 57095,232 : poke 57096,3 : rem 1000 bytes
+	poke 57098,0
+	return
+	:
+	:
+
+
+reuSave:
+#lineskip 500
+	rem **push the current screen into the snapshot ring**
+	rem called once per screenful from printQueued, and once directly on
+	rem entering scrollback so the newest partial page is not lost.
+	rem this is why scrollback is instant: the reu stores screen CODES,
+	rem already rendered, so paging back is one dma straight into screen
+	rem ram with no basic and no character conversion. storing the text
+	rem and re-rendering would cost ~0.35s per message.
+	if ru = 0 then return
+	if sm < 2 then return
+	sl = sn : gosub reuBlk : poke 57089,144
+	sn = sn + 1 : if sn >= sm then sn = 0
+	if sc < sm then sc = sc + 1
+	return
+	:
+	:
+
+
+scrollBack:
+#lineskip 500
+	rem **f5 - page back through saved screens**
+	if ru = 0 then return
+	rem the page you are looking at right now may be only part-way to the
+	rem next automatic snapshot, so capture it BEFORE the empty check --
+	rem otherwise the very first f5 bails out with nothing to show.
+	sq = 0 : gosub reuSave
+	if sc = 0 then return
+	sb = 1 : bo = peek(53280)
+	rem park the live screen in the reserved slot so we can put it back
+	sl = sm : gosub reuBlk : poke 57089,144
+	sv = sn - 1 : if sv < 0 then sv = sm - 1
+	sd = 0
+	sbShow:
+	sl = sv : gosub reuBlk : poke 57089,145
+	poke 53280,2 : rem red border: you are looking at history
+	gosub sbMark
+	sbKey:
+	rem keep draining the radio. same rule as the channel picker: at 600
+	rem baud the kernal buffer fills in ~4s and an overrun desyncs the
+	rem frame parser, so "paused" only ever means paused from the screen.
+	gosub readFrame
+	get a$ : if a$ = "" then goto sbKey
+	if a$ = "{f5}" then goto sbOlder
+	if a$ = "{f7}" then goto sbNewer
+	goto sbExit
+	sbOlder:
+	if sd >= sc - 1 then goto sbKey
+	sd = sd + 1
+	sv = sv - 1 : if sv < 0 then sv = sm - 1
+	goto sbShow
+	sbNewer:
+	if sd = 0 then goto sbKey
+	sd = sd - 1
+	sv = sv + 1 : if sv >= sm then sv = 0
+	goto sbShow
+	sbExit:
+	sl = sm : gosub reuBlk : poke 57089,145 : rem live screen back
+	poke 53280,bo
+	sb = 0
+	return
+	:
+	:
+
+
+sbMark:
+#lineskip 500
+	rem **show how far back we are, top right of the screen**
+	rem poked straight into screen ram rather than printed, so it cannot
+	rem scroll the snapshot we just loaded. screen codes: digits are
+	rem 48-57, "-" is 45. colour ram is set too, in case that corner of
+	rem the restored screen was never written.
+	s1 = int(sd / 100) : s2 = int((sd - s1 * 100) / 10)
+	s3 = sd - s1 * 100 - s2 * 10
+	poke 1024+36,45 : poke 1024+37,48+s1
+	poke 1024+38,48+s2 : poke 1024+39,48+s3
+	poke 55296+36,1 : poke 55296+37,1
+	poke 55296+38,1 : poke 55296+39,1
+	return
+	:
+	:
+
+
+reuDetect:
+#lineskip 500
+	rem **is a ram expansion unit present, and how big?**
+	rem the 8726 REC lives at $df00-$df0a. this is deliberately in basic
+	rem rather than machine code: it runs once at startup, costs a few
+	rem hundred ms, and keeps the $c000 routine -- the one thing
+	rem everything else depends on -- untouched.
+	rem   57089 $df01 command: $90 = execute now, c64->reu
+	rem                        $91 = execute now, reu->c64
+	rem   57090/1 $df02/3 c64 address lo/hi
+	rem   57092/3/4 $df04/5/6 reu address lo/hi/bank
+	rem   57095/6 $df07/8 transfer length lo/hi
+	rem   57098 $df0a address control (0 = increment both)
+	rem the transfer does NOT autoload, so the base registers have to be
+	rem written again before every transfer.
+	ru = 0 : uk = 0
+	rem test pattern in the cassette buffer at $033c (828) -- free ram
+	poke 828,86 : poke 829,171 : poke 830,12 : poke 831,241
+	ub = 0 : gosub reuStash
+	rem wipe it, then pull it back. with no reu the registers are open
+	rem bus, nothing is transferred, and the buffer stays wiped.
+	poke 828,0 : poke 829,0 : poke 830,0 : poke 831,0
+	ub = 0 : gosub reuFetch
+	if peek(828) <> 86 then return
+	if peek(829) <> 171 then return
+	if peek(830) <> 12 then return
+	if peek(831) <> 241 then return
+	ru = 1 : uk = 64
+	rem **size: find where the address space wraps.**
+	rem bank 0 holds 86. write a different marker to bank 1, 2, 4, 8...
+	rem and re-read bank 0. when bank 0 has changed, the bank register
+	rem has wrapped and we know the real size.
+	ub = 1
+	reuSizeLoop:
+	if ub > 128 then goto reuSizeDone
+	poke 828, 200 + ub
+	gosub reuStash
+	poke 828,0
+	rem uc, not ub2: only the first TWO characters of a basic variable
+	rem name are significant, so "ub2" IS "ub" and this would have zeroed
+	rem the loop counter and hung.
+	uc = ub : ub = 0 : gosub reuFetch : ub = uc
+	if peek(828) <> 86 then goto reuSizeDone
+	uk = ub * 64 * 2
+	ub = ub * 2
+	goto reuSizeLoop
+	reuSizeDone:
+	return
+	:
+	:
+
+
+reuStash:
+#lineskip 500
+	rem **copy 1-4 bytes from $033c out to reu bank ub, offset 0**
+	poke 57090,60 : poke 57091,3 : rem c64 $033c
+	poke 57092,0 : poke 57093,0 : poke 57094,ub
+	poke 57095,4 : poke 57096,0 : rem 4 bytes
+	poke 57098,0
+	poke 57089,144 : rem $90 execute now, c64 -> reu
+	return
+	:
+	:
+
+
+reuFetch:
+#lineskip 500
+	rem **copy those bytes back from reu bank ub, offset 0**
+	poke 57090,60 : poke 57091,3
+	poke 57092,0 : poke 57093,0 : poke 57094,ub
+	poke 57095,4 : poke 57096,0
+	poke 57098,0
+	poke 57089,145 : rem $91 execute now, reu -> c64
+	return
+	:
+	:
+
+
 mldata:
 #lineskip 500
 	rem machine code for the $c000 serial engine
 	data 173,3,207,208,110,172,156,2,204,155,2,240,102,177,247,238
 	data 156,2,174,0,207,240,39,202,240,47,202,240,54,174,2,207
-	data 157,0,206,238,2,207,232,236,1,207,144,217,32,152,192,169
+	data 157,0,206,238,2,207,232,236,1,207,144,217,32,164,192,169
 	data 1,141,3,207,238,4,207,169,0,141,0,207,240,53,201,62
 	data 208,195,169,1,141,0,207,208,188,141,1,207,169,2,141,0
 	data 207,208,178,201,0,208,21,173,1,207,240,16,201,177,176,12
 	data 169,0,141,2,207,169,3,141,0,207,208,153,169,0,141,0
 	data 207,240,146,173,5,207,240,22,169,120,141,3,221,174,6,207
-	data 189,205,192,201,255,240,8,141,1,221,232,142,6,207,96,169
-	data 0,141,5,207,141,1,221,96,162,0,236,1,207,176,41,189
-	data 0,206,240,30,201,32,144,33,201,127,176,29,201,65,144,18
-	data 201,91,144,12,201,97,144,10,201,123,176,6,41,223,208,2
-	data 9,128,157,0,205,232,208,210,96,169,46,208,245,48,72,48
-	data 0,255,120,120,0,120,120,0,255
+	data 189,152,192,201,255,240,8,141,1,221,232,142,6,207,96,169
+	data 0,141,5,207,141,1,221,96,48,72,48,0,255,120,120,0
+	data 120,120,0,255,162,0,160,0,236,1,207,176,58,189,0,206
+	data 240,46,201,226,240,61,201,9,240,49,201,10,240,45,201,13
+	data 240,41,201,32,144,41,201,127,176,37,201,65,144,18,201,91
+	data 144,12,201,97,144,10,201,123,176,6,41,223,208,2,9,128
+	data 153,0,205,232,200,208,193,140,7,207,96,169,32,208,241,169
+	data 46,208,237,232,236,1,207,176,246,189,0,206,201,128,208,239
+	data 232,236,1,207,176,233,189,0,206,201,152,240,24,201,153,240
+	data 20,201,156,240,20,201,157,240,16,201,147,240,16,201,148,240
+	data 12,169,46,208,187,169,39,208,183,169,34,208,179,169,45,208
+	data 175

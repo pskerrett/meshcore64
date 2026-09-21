@@ -8,7 +8,7 @@ brings a LoRa radio onto the C64 user port. The C64 talks to the radio over
 that port at 600 baud.
 
 ```
-meshcore 64  1.0
+MeshCore 64   v1.1b
 radio fw: mc64 1.17.1
 connected as 59800697 on Public
 f1 channels   f7 public
@@ -49,6 +49,11 @@ This is an independent, unofficial port and is not affiliated with Jim_64.
   waiting on other channels. Switch to one and they're replayed.
 - **Lights up the cartridge.** All six lamps sweep at startup, then a
   ripple on every incoming message and a flash when you send.
+- **Scrolls back, with a RAM Expansion Unit.** `F5` pages back through
+  screens of history, `F7` pages forward, anything else returns to live.
+  The border turns red while you are looking at history. Without an REU
+  the client behaves exactly as it does otherwise, and `F5` is not
+  offered.
 
 Not yet: contacts, direct messages, or repeater admin. Channels only.
 
@@ -130,11 +135,54 @@ same contents wrapped in the header emulators expect, so use that one for
 VICE. The image is padded with `$FF`, which is also erased-EPROM state, so
 it burns cleanly.
 
-Keys: `F1` channels · `F7` Public · `F3` status · `r` (in the channel list)
-scan all 40 slots.
+Keys: `F1` channels · `F7` Public · `F5` scrollback · `F3` status ·
+`R` (in the channel list) rescans all 40 slots.
+
+The startup screen reports the RAM Expansion Unit if one is present, with
+its size.
 
 If the cartridge lamps look inverted — one dark lamp sweeping rather than
 one lit — the LEDs are wired active-low, and the patterns need flipping.
+
+---
+
+## Building
+
+The source keeps every comment. The build strips them, and that is not
+cosmetic: with comments intact the program compiles to about 36KB, which
+leaves under 2.5KB for variables against the roughly 2.8KB the arrays
+need, and it fails with `?OUT OF MEMORY` while building a string.
+Stripped, it is about 10KB and leaves 28KB free.
+
+```bash
+BC=/path/to/vs64/tools/bc.py ./build.sh
+```
+
+That compiles `meshcore64.bas` and runs `tools/crunch.py` over the
+result, producing two files:
+
+| file | |
+|---|---|
+| `meshcore64.prg` | the runnable build, comments stripped |
+| `meshcore64-full.prg` | the same program with comments, for reading — too large to run |
+
+Compiling needs VS64's BASIC tokeniser, which is plain Python and does
+not need the editor: `git clone https://github.com/rolandshacks/vs64`,
+then point `BC` at its `tools/bc.py`.
+
+### tools/crunch.py
+
+The comment stripper is standalone and has no dependencies. It works on
+any tokenised C64 BASIC `.prg`, not just this one:
+
+```bash
+python3 tools/crunch.py in.prg out.prg
+```
+
+It removes `REM` text, drops lines that become empty **unless something
+branches to them**, and relinks the line pointers. It does not renumber,
+so `GOTO` targets keep working and the line in `?ERROR IN nnn` still
+matches the compiler's map file.
 
 ---
 
