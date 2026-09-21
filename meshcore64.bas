@@ -925,7 +925,12 @@ reuDetect:
 	ub = 1
 	reuSizeLoop:
 	if ub > 128 then goto reuSizeDone
-	poke 828, 200 + ub
+	rem marker is ub itself, NOT 200+ub: the probe reaches bank 128 on a
+	rem large unit and 200+128 overflows a poke, which is an illegal
+	rem quantity error at startup on anything 4mb or bigger. ub only ever
+	rem takes the values 1,2,4..128, none of which collide with the 86
+	rem written into bank 0, so it still distinguishes an alias.
+	poke 828, ub
 	gosub reuStash
 	poke 828,0
 	rem uc, not ub2: only the first TWO characters of a basic variable

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Compile the C64 client:  meshcore64.bas -> meshcore64.prg
 #
-# NOTE the -c (crunch). It is not an optimisation, it is REQUIRED: the
+# NOTE the -c (crunch), which is bc.py's own comment stripper. It is not
+# an optimisation, it is REQUIRED: the
 # commented source compiles to ~36KB, which leaves ~2.2KB for variables
 # while the arrays alone need ~2.8KB - the program dies with ?OUT OF
 # MEMORY building a string. Crunched it is ~10KB, leaving ~28KB free.
@@ -20,9 +21,5 @@ if [ ! -f "$BC" ]; then
 fi
 
 # bc.py needs a path with a directory component for its output.
-# compile with comments intact, then strip them with our own tool. keeping
-# the two steps separate means the comment-stripping is ours to maintain
-# and anyone can run it on a build of their own: tools/crunch.py in out
-python3 "$BC" -o "$PWD/meshcore64-full.prg" "$PWD/meshcore64.bas"
-python3 "$PWD/tools/crunch.py" "$PWD/meshcore64-full.prg" "$PWD/meshcore64.prg"
+python3 "$BC" -c -o "$PWD/meshcore64.prg" "$PWD/meshcore64.bas"
 echo "built: $PWD/meshcore64.prg"

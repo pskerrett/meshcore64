@@ -111,42 +111,7 @@ about a third of the time on a real 1541); or put `meshcore64.crt` on a
 cartridge and it runs the moment you switch on — the mesh modem is on the
 user port, so the expansion port is free for it.
 
-### Building a cartridge
-
-The image is built for the simplest kind of C64 cartridge — a **plain 8K
-ROM cart mapped at $8000**, the same arrangement most commercial 8K game
-carts used:
-
-| | |
-|---|---|
-| ROM size | **8 KB** — a 2764 / 27C64 EPROM, or a 28C64 EEPROM |
-| Maps at | `$8000`–`$9FFF` |
-| `/EXROM` (edge pin 9) | **tied low** |
-| `/GAME` (edge pin 8) | **left high** — not connected |
-| Autostart | via the `CBM80` signature at `$8004`, already in the image |
-
-No bank switching, no glue logic, no GAL — just the EPROM, its address
-decoding, and those two control lines. Any off-the-shelf 8K C64 cartridge
-board should work as-is, and so will an EasyFlash or similar if you would
-rather not burn an EPROM.
-
-Burn `meshcore64-cart.bin` — the raw 8192 bytes. `meshcore64.crt` is the
-same contents wrapped in the header emulators expect, so use that one for
-VICE. The image is padded with `$FF`, which is also erased-EPROM state, so
-it burns cleanly.
-
-Keys: `F1` channels · `F7` Public · `F5` scrollback · `F3` status ·
-`R` (in the channel list) rescans all 40 slots.
-
-The startup screen reports the RAM Expansion Unit if one is present, with
-its size.
-
-If the cartridge lamps look inverted — one dark lamp sweeping rather than
-one lit — the LEDs are wired active-low, and the patterns need flipping.
-
----
-
-## Building
+### Building
 
 The source keeps every comment. The build strips them, and that is not
 cosmetic: with comments intact the program compiles to about 36KB, which
@@ -154,35 +119,25 @@ leaves under 2.5KB for variables against the roughly 2.8KB the arrays
 need, and it fails with `?OUT OF MEMORY` while building a string.
 Stripped, it is about 10KB and leaves 28KB free.
 
+Compiling needs VS64's BASIC tokeniser, which is plain Python and does
+not need the editor:
+
 ```bash
+git clone https://github.com/rolandshacks/vs64
 BC=/path/to/vs64/tools/bc.py ./build.sh
 ```
 
-That compiles `meshcore64.bas` and runs `tools/crunch.py` over the
-result, producing two files:
-
-| file | |
-|---|---|
-| `meshcore64.prg` | the runnable build, comments stripped |
-| `meshcore64-full.prg` | the same program with comments, for reading — too large to run |
-
-Compiling needs VS64's BASIC tokeniser, which is plain Python and does
-not need the editor: `git clone https://github.com/rolandshacks/vs64`,
-then point `BC` at its `tools/bc.py`.
-
-### tools/crunch.py
-
-The comment stripper is standalone and has no dependencies. It works on
-any tokenised C64 BASIC `.prg`, not just this one:
+`build.sh` passes **`-c`**, the tokeniser's own comment stripper, which is
+what keeps the build small enough to run:
 
 ```bash
-python3 tools/crunch.py in.prg out.prg
+python3 bc.py -c -o meshcore64.prg meshcore64.bas
 ```
 
-It removes `REM` text, drops lines that become empty **unless something
-branches to them**, and relinks the line pointers. It does not renumber,
-so `GOTO` targets keep working and the line in `?ERROR IN nnn` still
-matches the compiler's map file.
+Drop the `-c` and you get a readable listing on the C64 — useful for
+poking around, but too large to run. Other flags worth knowing: `-m`
+writes a map file, which turns the line number in a `?ERROR IN nnn` back
+into a line of source.
 
 ---
 
