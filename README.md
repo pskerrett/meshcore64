@@ -8,7 +8,7 @@ brings a LoRa radio onto the C64 user port. The C64 talks to the radio over
 that port at 600 baud.
 
 ```
-MeshCore 64   v1.1b
+MeshCore 64   v1.2c
 radio fw: mc64 1.17.1
 connected as 59800697 on Public
 f1 channels   f7 public
@@ -105,11 +105,59 @@ is already on the radio — it doesn't create channels.
 start the program. It connects on its own.
 
 Three ways to run it. Load `meshcore64.prg` the usual way; or put
-`meshcore64.d64` on a disk and `LOAD"MESHCORE64",8` (the disk also carries
-`MC64.SMALL`, the same program with comments stripped, which loads in
-about a third of the time on a real 1541); or put `meshcore64.crt` on a
-cartridge and it runs the moment you switch on — the mesh modem is on the
-user port, so the expansion port is free for it.
+`meshcore64.d64` on a disk and `LOAD"MESHCORE64",8`; or put
+`meshcore64.crt` on a cartridge and it runs the moment you switch on — the
+mesh modem is on the user port, so the expansion port is free for it.
+
+### Building a cartridge
+
+The cartridge image is **Magic Desk** (`.crt` type 19) — a banked format,
+and the banking is not optional. The reason is a squeeze:
+
+- The program is about 12.5KB, so it **does not fit an 8K cart**.
+- The expansion port exposes only two 8K windows, `$8000` and `$A000`, and
+  `$A000` is where **BASIC ROM** lives. A 16K cart therefore *replaces*
+  BASIC — leaving nothing to run a BASIC program with. A bigger EPROM
+  doesn't help either: the C64 still only sees 8K at a time.
+
+Magic Desk fixes both with one latch at `$DE00`. Its low bits select an 8K
+bank; **bit 7 disables the cartridge outright**. So the cart copies bank 0
+into RAM, switches to bank 1, copies the rest, then banks *itself* out —
+BASIC reappears and `RUN`s the program, which from then on is an ordinary
+BASIC program in ordinary RAM.
+
+| | |
+|---|---|
+| ROM size | **32 KB** — a 27C256. Only the first two banks are used; the rest is `$FF` |
+| Maps at | `$8000`–`$9FFF`, one 8K bank at a time |
+| Bank register | write `$DE00` — low bits = bank, **bit 7 = disable cart** |
+| `/EXROM` (edge pin 9) | **tied low** |
+| `/GAME` (edge pin 8) | **left high** — not connected |
+| Autostart | via the `CBM80` signature at `$8004`, already in the image |
+
+Why 32K when only 16K is used: 32K is Magic Desk's **minimum**. VICE's own
+`cartconv` rejects 8K and 16K images for this type outright, so a 16K burn
+is not a valid Magic Desk cartridge even though 16K is all the data there
+is. Burn the full 32K.
+
+Hardware is an EPROM plus a '273-style latch decoding a write to `$DE00`.
+The 1541 Ultimate II+ and similar do it in software with no extra parts —
+and being software, they can supply the REU at the same time, so
+scrollback works from cartridge.
+
+Burn **`meshcore64.bin`** — one flat 32768-byte image, banks end to end,
+which is what an EPROM burner wants. `meshcore64.crt` is the same contents
+in the container emulators expect, so use that one for VICE. The padding is
+`$FF`, which is also erased-EPROM state, so it burns cleanly.
+
+*One trap if you build something like this yourself:* the code that writes
+`$DE00` cannot itself be running inside the cartridge window. The instant
+that write lands, the bytes under the program counter change — to program
+data on a bank switch, to empty RAM on the bank-out — and the CPU runs off
+into garbage with a blank screen and no other symptom. The cart's ROM stub
+therefore does one thing: copy a small mover routine into the tape buffer
+at `$033C` and jump to it. All the bank switching happens from there, in
+RAM, where the banks moving beneath `$8000` cannot reach it.
 
 ### Building
 
@@ -241,8 +289,10 @@ mean patching code unrelated to serial I/O.
 - **The radio is chatty.** It reports *every* LoRa packet it overhears,
   whether or not it's addressed to you, and on a 600-baud link that's the
   main reason a busy mesh feels slow. 
-- **No scrollback.** Switching channels replays what you missed, but
-  earlier history isn't kept.
+- **Scrollback needs an REU.** With a RAM Expansion Unit, every message is
+  archived per channel and `F5` pages back through it. Without one,
+  switching channels still replays what you missed, but earlier history
+  isn't kept and `F5` is not offered.
 - **Channel slots can have gaps.** The channel list normally stops scanning
   after a few empty slots, which is fast but misses a channel sitting above
   a gap. Press `r` in the list to sweep all 40 (about 40 seconds).

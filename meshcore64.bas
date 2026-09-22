@@ -12,7 +12,7 @@ header:
 	rem -d serial_baud_rate=600 wired to
 	rem the userport instead of usb.
 	rem
-	rem 1.1b: handshake, channel list
+	rem 1.2c: handshake, channel list
 	rem (f1), per-channel chat, cart leds.
 	rem contacts / direct messages yet.
 	rem ***********************************
@@ -44,7 +44,7 @@ initialize:
 	rem this is allowed above the open only because the implicit CLR wipes
 	rem zv/zs/zj/zd and nothing here is needed afterwards. do NOT put
 	rem anything above the open that has to survive it.
-	print"{lower}" : print"{clear}{white}MeshCore 64   v1.1b"
+	print"{lower}" : print"{clear}{white}MeshCore 64   v1.2c"
 	print"------------------------------------"
 	poke 56579,126 : zv = 2 : zs = 2
 	for zj = 1 to 24
@@ -59,11 +59,11 @@ initialize:
 	rem **machine-language serial engine**
 	rem basic needs ~50ms per received byte (get# alone benchmarks at
 	rem 52ms), but at 600 baud a byte lands every 16.7ms -- a 3x deficit
-	rem no amount of basic tuning can close. this 305-byte routine at
+	rem no amount of basic tuning can close. this 346-byte routine at
 	rem $c000 drains the kernal buffer and assembles frames in ~50 cycles
 	rem per byte instead, so basic only ever sees completed frames. it
 	rem also steps the cartridge led animations (see below).
-	for zi = 0 to 304 : read zd : poke 49152 + zi, zd : next zi
+	for zi = 0 to 345 : read zd : poke 49152 + zi, zd : next zi
 	get#2, rb$ : rem one arming call: the chkin that starts the receiver
 	poke 52992,0 : poke 52995,0 : rem ml STATE=0, READY=0
 	rem **cartridge leds, driven by the ml routine.**
@@ -95,7 +95,25 @@ initialize:
 	rem descriptors instead of 40x8=320 keeps basic's garbage collector
 	rem out of trouble -- gc cost on this machine grows sharply with the
 	rem number of live strings.
-	dim hm$(23) : dim hc(23) : dim rp(9)
+	rem **size the message ring from the ram that is actually left.**
+	rem hard-coding it is how the build ended up dying with ?OUT OF
+	rem MEMORY: a number that fits today stops fitting when the program
+	rem grows. fre(0) goes negative above 32767 on this machine, hence the
+	rem correction. ~50 bytes per entry (3 descriptor + 40 heap + 5 for
+	rem hc), and 5000 held back for sh(), bk$/sp$ and working strings.
+	zf = fre(0) : if zf < 0 then zf = zf + 65536
+	hz = int((zf - 5000) / 50)
+	if hz > 120 then hz = 120
+	if hz < 8 then hz = 8
+	dim hm$(hz - 1) : dim hc(hz - 1) : dim rp(14)
+	rem **message archive, in the reu, one region per channel.**
+	rem a line is 40 screen-code bytes, so 25 consecutive lines are
+	rem exactly the 1000 bytes of screen ram and a page is ONE dma. nine
+	rem regions: channels 0-7 get their own, higher channels share 7, and
+	rem "All" gets region 8 and receives every line.
+	rem no tag array is needed - regions are contiguous per channel - so
+	rem depth scales with the reu instead of being capped by c64 ram.
+	dim lw(8) : dim lf(8)
 	rem bk$ = cursor-lefts, sp$ = spaces. used to back up over the prompt
 	rem and overwrite it, so an incoming message can reuse the prompt's
 	rem own screen row instead of leaving it blank above every message.
@@ -113,14 +131,15 @@ initialize:
 	rem creates no garbage. it also skips pointless work: device_info
 	rem is 82 bytes we never even read.
 	hs = 0 : im = 0 : og$ = "" : oa$ = "" : ez = 0 : lt = ti
-	ru = 0 : uk = 0 : sn = 0 : sc = 0 : sm = 0 : sb = 0 : sq = 0 : cc = 0 : co = 0 : ck = 0 : ut = 0 : cf = 0 : ht = 0 : pr$ = "> " : rem channel, prev, cached, unread, sweep, history, prompt
+	ru = 0 : uk = 0 : lr = 0 : sb = 0 : cc = 0 : co = 0 : ck = 0 : ut = 0 : cf = 0 : ht = 0 : pr$ = "> " : rem channel, prev, cached, unread, sweep, history, prompt
 	rem (title already on screen from before the open; CLR wipes variables,
 	rem not the display)
 	gosub reuDetect
 	rem uk is in kb and a screen snapshot is exactly 1kb, so the slot
 	rem count is uk -- less one, reserved to park the live screen while
 	rem you are scrolling.
-	if ru = 1 then sm = uk - 1
+	rem uk kb of reu holds uk*25 lines of 40 bytes; split across 9 regions
+	if ru = 1 then lr = int(uk * 25 / 9)
 	rem str$ of a positive number carries a leading space, hence mid$
 	if ru = 1 then print"REU ";mid$(str$(uk),2);"K - F5 scrollback ready"
 	if ru = 0 then print"No REU - scrollback disabled"
@@ -325,7 +344,14 @@ rxChanMsg:
 	rem bling on ANY incoming message, whatever channel it belongs to --
 	rem this is "the mesh is talking", not "this is for you".
 	poke 52998,0 : poke 52997,1
+	rem cc = 255 is the "All" view: show every channel, filter nothing
+	rem archive first, so every message is kept whatever channel we are
+	rem watching -- this is what makes leaving a channel and coming back
+	rem non-destructive.
+	gosub larch
+	if cc = 255 then goto rxChanMine
 	if mc <> cc then goto rxChanOther
+	rxChanMine:
 	rem **our channel: extract, convert, queue. costs nothing extra.**
 	rem deliberately identical to the pre-history build. a message for
 	rem the channel we are watching is printed now and never replayed
@@ -333,6 +359,17 @@ rxChanMsg:
 	rem definition nothing on the current channel is unread. so it is
 	rem never stored, and this path pays nothing for the history feature.
 	eb = 52480 : ps = 11 : pe = peek(52999) - 1 : gosub ext
+	rem in the "All" view, tag each line with the channel it arrived on --
+	rem a merged feed without attribution is unreadable. only in All: on a
+	rem named channel you already know where you are, and the prefix would
+	rem eat 10 of the 40 columns for nothing.
+	if cc <> 255 then goto rxChanQueue
+	zn$ = ch$(mc)
+	rem a channel we have never scanned has no name yet, so fall back to
+	rem its index rather than showing empty brackets
+	if zn$ = "" then zn$ = "ch" + mid$(str$(mc),2)
+	i$ = "[" + left$(zn$,8) + "] " + i$
+	rxChanQueue:
 	rem no channel-name prefix here. the firmware already prepends
 	rem "<sender>: " into the text itself -- basechatmesh.cpp's
 	rem sendGroupMessage() does sprintf(&temp[5], "%s: ", sender_name)
@@ -353,7 +390,7 @@ rxChanMsg:
 	eb = 52480 : ps = 11 : pe = peek(52999) - 1
 	if pe > ps + 39 then pe = ps + 39
 	gosub ext
-	zs = ht - 24*int(ht/24)
+	zs = ht - hz*int(ht/hz)
 	hm$(zs) = i$ : hc(zs) = mc : ht = ht + 1
 	rem refresh the prompt IN PLACE so the count is visible even when
 	rem nothing prints: chr$(13) drops to column 0 of the next line and
@@ -429,14 +466,6 @@ printQueued:
 	if len(dq$) < zl then print left$(sp$,zl-len(dq$));
 	print
 	print pr$;og$;
-	rem **one snapshot per SCREENFUL, not per message.**
-	rem consecutive screens overlap by 24 of 25 lines, so snapshotting
-	rem every message stored the same content 18 times over and made f5
-	rem step back by a single line. counting messages instead means one
-	rem press = one genuinely new page, and the same reu holds ~18x more
-	rem history (a 512k unit: ~9000 messages rather than ~500).
-	sq = sq + 1
-	if sq >= 18 then sq = 0 : gosub reuSave
 	return
 	:
 	:
@@ -487,6 +516,9 @@ sendChatMsg:
 #lineskip 500
 	rem **cmd_send_channel_txt_msg on the currently selected channel**
 	if og$ = "" then return
+	rem "All" is a read-only monitor: there is no single channel to send
+	rem to, and quietly defaulting to Public would post to the wrong place.
+	if cc = 255 then print"{13}pick a channel to send" : return
 	uv = bt + int((ti - bj) / 60) : gosub encU32 : rem estimate device clock
 	pl$ = chr$(3) + chr$(0) + chr$(cc) + e$ + oa$
 	rem opcode, txt_type=plain, channel_idx=cc, timestamp(4), text
@@ -541,9 +573,9 @@ ext:
 #lineskip 500
 	rem **build i$ from payload bytes ps..pe of the buffer at eb**
 	rem eb = 52736 ($ce00) RAW bytes - opcodes, channel indexes, timestamps
-	rem NOTE for text: use peek(52999) (CLEN), not fl, for the end offset.
-	rem the converted copy is SHORTER than the raw frame whenever a 3-byte
-	rem utf-8 sequence collapsed to one character.
+	rem CLEN always equals fl now: the converter is strictly 1:1, because
+	rem collapsing utf-8 here shifted every later offset and corrupted
+	rem text that follows a binary field containing $e2.
 	rem eb = 52480 ($cd00) TEXT - the ml has already converted ascii to
 	rem petscii there. the old basic converter (a2p) cost ~56ms PER
 	rem CHARACTER, i.e. 2.3s for a 40-char message, so it is gone from
@@ -604,7 +636,9 @@ setPrompt:
 setChan:
 #lineskip 500
 	rem **switch to channel cc (co = the channel we were on before)**
-	cn$ = ch$(cc)
+	rem cc = 255 is "All" and has no entry in ch$()
+	if cc = 255 then cn$ = "All"
+	if cc < 40 then cn$ = ch$(cc)
 	rem only treat this as a real switch if the channel actually
 	rem changed. cancelling out of the picker lands here too, and it
 	rem must not eat messages that arrived while the picker was open.
@@ -613,13 +647,28 @@ setChan:
 	rem printing it under the new channel's name would be a lie.
 	im = 0
 	co = cc
+	if ru = 1 then goto setChanReu
+	rem no reu: the old behaviour - announce the channel and replay what
+	rem arrived while we were away, out of the small ram ring.
 	print"{13}-- ";cn$;" --"
-	gosub replayChan : rem show what arrived while we were away
+	gosub replayChan
+	goto setChanClr
+	setChanReu:
+	rem with an archive there is nothing to "replay": paint this channel's
+	rem most recent page straight from the reu. leaving a channel and
+	rem coming back is now non-destructive - you get the screen you left.
+	gosub lreg
+	if lf(zr) = 0 then print"{clear}{white}-- ";cn$;" --" : goto setChanClr
+	zy = lw(zr) - 1 : if zy < 0 then zy = lr - 1
+	gosub lpage
+	gosub lhome
+	setChanClr:
 	rem entering a channel clears its unread count -- you have now seen
 	rem those messages, because replayChan just printed them.
-	ut = ut - cu(cc)
+	rem in "All" nothing is unread elsewhere, and cu() has no slot 255
+	if cc = 255 then ut = 0
+	if cc < 40 then ut = ut - cu(cc) : cu(cc) = 0
 	if ut < 0 then ut = 0
-	cu(cc) = 0
 	setChanSame:
 	rem prompt is built AFTER the counter clears, so it shows the new
 	rem total rather than one that still includes this channel.
@@ -636,13 +685,14 @@ replayChan:
 	rem walk the ring oldest-first collecting this channel's entries,
 	rem then print only the last cu(cc) of them -- exactly the number the
 	rem picker and the prompt were showing.
+	if cc = 255 then return : rem no per-channel replay in the All view
 	if ht = 0 then return
 	if cu(cc) = 0 then return
 	rn = 0
-	j0 = ht - 24 : if j0 < 0 then j0 = 0
+	j0 = ht - hz : if j0 < 0 then j0 = 0
 	for zj = j0 to ht - 1
-	zs = zj - 24*int(zj/24)
-	if hc(zs) = cc and rn < 10 then rp(rn) = zs : rn = rn + 1
+	zs = zj - hz*int(zj/hz)
+	if hc(zs) = cc and rn < 15 then rp(rn) = zs : rn = rn + 1
 	next zj
 	rem the ring may have rolled over and dropped some of what we
 	rem counted, so never ask for more entries than we actually kept.
@@ -651,6 +701,11 @@ replayChan:
 	for zj = rn - rw to rn - 1
 	print hm$(rp(zj))
 	next zj
+	rem the counter can promise more than the ring kept, or more than the
+	rem burst cap of 15. say so rather than silently showing fewer --
+	rem replaying 50 messages would take ~17s at 0.35s each, which is the
+	rem freeze we just removed from channel switching.
+	if cu(cc) > rw then print"...and ";mid$(str$(cu(cc)-rw),2);" more"
 	return
 	:
 	:
@@ -741,7 +796,8 @@ chanPicker:
 	chanShow:
 	rem build the menu: map digits 0-9 onto whatever channel indexes
 	rem actually have names, so a sparse setup still gets a dense menu.
-	np = 0
+	rem "All" is a synthetic entry, channel 255, always first
+	pk(0) = 255 : np = 1
 	for zi = 0 to 39
 	if ch$(zi) <> "" and np < 10 then pk(np) = zi : np = np + 1
 	next zi
@@ -749,11 +805,20 @@ chanPicker:
 	print
 	if np = 0 then print"None found" : goto chanPickLoop
 	for zi = 0 to np - 1
-	print" ";chr$(48+zi);"  ";left$(ch$(pk(zi)),18);
+	zt = pk(zi)
+	print" ";chr$(48+zi);"  ";
+	if zt = 255 then print"All";
+	rem **basic has no short-circuit evaluation.** "if zt < 40 and
+	rem cu(zt) > 0" reads cu(255) even when the first test is false, and
+	rem cu() only goes to 39 -- bad subscript. the guard has to be a
+	rem branch, not an AND.
+	if zt > 39 then goto chanShowMark
+	print left$(ch$(zt),18);
 	rem unread count per channel -- this is where you actually look to
 	rem see which channel has been busy while you were elsewhere.
-	if cu(pk(zi)) > 0 then print" (";mid$(str$(cu(pk(zi))),2);")";
-	if pk(zi) = cc then print" *";
+	if cu(zt) > 0 then print" (";mid$(str$(cu(zt)),2);")";
+	chanShowMark:
+	if zt = cc then print" *";
 	print
 	next zi
 	print
@@ -788,39 +853,146 @@ chanPicker:
 	:
 
 
-reuBlk:
+lreg:
 #lineskip 500
-	rem **point the REC at screen ram <-> snapshot slot sl**
-	rem a snapshot is the 1000 bytes of screen ram at $0400. slots are
-	rem 1k apart so the low byte of the reu address is always zero:
-	rem   hi   = (slot mod 64) * 4
-	rem   bank = slot / 64
-	rem the caller then writes 144 (stash) or 145 (fetch) to $df01.
-	poke 57090,0 : poke 57091,4 : rem c64 $0400
-	poke 57092,0
-	poke 57093,(sl and 63) * 4
-	poke 57094,int(sl / 64)
-	poke 57095,232 : poke 57096,3 : rem 1000 bytes
-	poke 57098,0
+	rem **which reu region belongs to the channel we are in**
+	rem 0-7 have their own, higher channels share 7, "All" gets 8.
+	zr = cc
+	if zr > 7 then zr = 7
+	if cc = 255 then zr = 8
 	return
 	:
 	:
 
 
-reuSave:
+lxfer:
 #lineskip 500
-	rem **push the current screen into the snapshot ring**
-	rem called once per screenful from printQueued, and once directly on
-	rem entering scrollback so the newest partial page is not lost.
-	rem this is why scrollback is instant: the reu stores screen CODES,
-	rem already rendered, so paging back is one dma straight into screen
-	rem ram with no basic and no character conversion. storing the text
-	rem and re-rendering would cost ~0.35s per message.
+	rem **set up the REC for a zw-byte transfer, c64 zm <-> reu zo**
+	rem the caller then pokes 144 (c64 -> reu) or 145 (reu -> c64).
+	poke 57090, zm - 256*int(zm/256)
+	poke 57091, int(zm/256)
+	poke 57092, zo - 256*int(zo/256)
+	poke 57093, int(zo/256) - 256*int(zo/65536)
+	poke 57094, int(zo/65536)
+	poke 57095, zw - 256*int(zw/256)
+	poke 57096, int(zw/256)
+	poke 57098, 0
+	return
+	:
+	:
+
+
+larch:
+#lineskip 500
+	rem **append this message to its channel's ring and to All**
+	rem the ml turns the text into 1 or 2 screen-code lines at $cc00;
+	rem soff tells it the text starts at payload byte 11 so the binary
+	rem header is not converted.
+	rem   49457 scrn   53000 SLEN (lines produced)   53001 SOFF
 	if ru = 0 then return
-	if sm < 2 then return
-	sl = sn : gosub reuBlk : poke 57089,144
-	sn = sn + 1 : if sn >= sm then sn = 0
-	if sc < sm then sc = sc + 1
+	rem 1) this channel's own region: the text as it stands. no prefix --
+	rem you already know which channel you are reading.
+	poke 53001,11 : sys 49391
+	zk = peek(53000)
+	zr = mc : if zr > 7 then zr = 7
+	gosub lput
+	rem 2) the All region gets the SAME text with a channel prefix, so
+	rem scrolling back through the merged feed still says where every
+	rem line came from -- not just the live view.
+	rem the prefix is poked into cbuf bytes 0-10, which hold the frame's
+	rem binary header. that is safe: basic reads the opcode and channel
+	rem index from the RAW buffer at 52736, never from cbuf. soff then
+	rem moves back to cover the prefix, so the ml converts prefix+text as
+	rem one string. "[" + 8 chars + "] " is exactly the 11 bytes free.
+	zn$ = ch$(mc)
+	if zn$ = "" then zn$ = "ch" + mid$(str$(mc),2)
+	zg$ = "[" + left$(zn$,8) + "] "
+	zh = 11 - len(zg$)
+	for zq = 1 to len(zg$)
+	poke 52480 + zh + zq - 1, asc(mid$(zg$,zq,1))
+	next zq
+	poke 53001,zh : sys 49391
+	zk = peek(53000)
+	zr = 8 : gosub lput
+	return
+	:
+	:
+
+
+lput:
+#lineskip 500
+	rem **write zk lines from $cc00 into region zr**
+	rem one dma while the lines stay contiguous in the ring; at the wrap
+	rem point, one line at a time.
+	if lw(zr) + zk > lr then goto lputw
+	zo = (zr * lr + lw(zr)) * 40
+	zm = 52224 : zw = zk * 40
+	gosub lxfer : poke 57089,144
+	lw(zr) = lw(zr) + zk
+	if lw(zr) >= lr then lw(zr) = 0
+	if lf(zr) < lr then lf(zr) = lf(zr) + zk
+	if lf(zr) > lr then lf(zr) = lr
+	return
+	lputw:
+	for zq = 0 to zk - 1
+	zo = (zr * lr + lw(zr)) * 40
+	zm = 52224 + zq * 40 : zw = 40
+	gosub lxfer : poke 57089,144
+	lw(zr) = lw(zr) + 1
+	if lw(zr) >= lr then lw(zr) = 0
+	if lf(zr) < lr then lf(zr) = lf(zr) + 1
+	next zq
+	return
+	:
+	:
+
+
+lpage:
+#lineskip 500
+	rem **paint region zr into rows 0-23, newest line zy at row 23**
+	rem 24 lines, NOT 25: row 24 belongs to the input prompt. painting
+	rem all 25 put the newest message on row 24 and the prompt then
+	rem overwrote it the moment you started typing a reply.
+	rem one dma of 1000 bytes when the range is contiguous and the ring
+	rem is full, two when it crosses the wrap. no basic rendering - that
+	rem is the whole reason lines are stored as screen codes.
+	rem **only ever paint lines that have actually been written.** a
+	rem region holding 5 lines used to get a full 25-line transfer, and
+	rem the other 20 came back as uninitialised reu - a screenful of
+	rem garbage characters.
+	if ru = 0 then return
+	zk = 24
+	if lf(zr) < 24 then zk = lf(zr)
+	if zk <= 0 then return
+	if zk < 24 then print"{clear}{white}";
+	zq = zy - zk + 1
+	if zq < 0 then zq = zq + lr
+	zx = zk
+	if zq + zk <= lr then goto lpg1
+	zx = lr - zq : rem split at the ring wrap
+	lpg1:
+	zo = (zr * lr + zq) * 40
+	zm = 1024 + (24 - zk) * 40
+	zw = zx * 40
+	gosub lxfer : poke 57089,145
+	if zx >= zk then return
+	zo = zr * lr * 40
+	zm = 1024 + (24 - zk + zx) * 40
+	zw = (zk - zx) * 40
+	gosub lxfer : poke 57089,145
+	return
+	:
+	:
+
+
+lhome:
+#lineskip 500
+	rem **cursor to the bottom line without scrolling or clearing**
+	rem home, then 23 carriage returns. the caller's "{13}prompt" takes
+	rem it to row 24. printing cr only moves the cursor, it does not
+	rem erase, so the page we just dma'd stays intact.
+	print"{home}";
+	for zq = 1 to 23 : print : next zq
 	return
 	:
 	:
@@ -828,20 +1000,17 @@ reuSave:
 
 scrollBack:
 #lineskip 500
-	rem **f5 - page back through saved screens**
+	rem **f5 - page back through this channel's archive**
+	rem the archive is per channel, so paging needs no filtering: the
+	rem lines are contiguous and a page is a single dma.
 	if ru = 0 then return
-	rem the page you are looking at right now may be only part-way to the
-	rem next automatic snapshot, so capture it BEFORE the empty check --
-	rem otherwise the very first f5 bails out with nothing to show.
-	sq = 0 : gosub reuSave
-	if sc = 0 then return
+	gosub lreg
+	if lf(zr) = 0 then return
 	sb = 1 : bo = peek(53280)
-	rem park the live screen in the reserved slot so we can put it back
-	sl = sm : gosub reuBlk : poke 57089,144
-	sv = sn - 1 : if sv < 0 then sv = sm - 1
+	zy = lw(zr) - 1 : if zy < 0 then zy = lr - 1
 	sd = 0
 	sbShow:
-	sl = sv : gosub reuBlk : poke 57089,145
+	gosub lpage
 	poke 53280,2 : rem red border: you are looking at history
 	gosub sbMark
 	sbKey:
@@ -854,19 +1023,25 @@ scrollBack:
 	if a$ = "{f7}" then goto sbNewer
 	goto sbExit
 	sbOlder:
-	if sd >= sc - 1 then goto sbKey
-	sd = sd + 1
-	sv = sv - 1 : if sv < 0 then sv = sm - 1
+	rem stop at the oldest line the ring still holds
+	if sd + 24 >= lf(zr) then goto sbKey
+	sd = sd + 24
+	zy = zy - 24 : if zy < 0 then zy = zy + lr
 	goto sbShow
 	sbNewer:
 	if sd = 0 then goto sbKey
-	sd = sd - 1
-	sv = sv + 1 : if sv >= sm then sv = 0
+	sd = sd - 24
+	if sd < 0 then sd = 0
+	zy = zy + 24 : if zy >= lr then zy = zy - lr
 	goto sbShow
 	sbExit:
-	sl = sm : gosub reuBlk : poke 57089,145 : rem live screen back
+	rem back to the live view: the newest page of the same region
+	zy = lw(zr) - 1 : if zy < 0 then zy = lr - 1
+	gosub lpage
 	poke 53280,bo
 	sb = 0
+	gosub lhome
+	print"{13}";pr$;og$;
 	return
 	:
 	:
@@ -986,13 +1161,15 @@ mldata:
 	data 207,240,146,173,5,207,240,22,169,120,141,3,221,174,6,207
 	data 189,152,192,201,255,240,8,141,1,221,232,142,6,207,96,169
 	data 0,141,5,207,141,1,221,96,48,72,48,0,255,120,120,0
-	data 120,120,0,255,162,0,160,0,236,1,207,176,58,189,0,206
-	data 240,46,201,226,240,61,201,9,240,49,201,10,240,45,201,13
-	data 240,41,201,32,144,41,201,127,176,37,201,65,144,18,201,91
-	data 144,12,201,97,144,10,201,123,176,6,41,223,208,2,9,128
-	data 153,0,205,232,200,208,193,140,7,207,96,169,32,208,241,169
-	data 46,208,237,232,236,1,207,176,246,189,0,206,201,128,208,239
-	data 232,236,1,207,176,233,189,0,206,201,152,240,24,201,153,240
-	data 20,201,156,240,20,201,157,240,16,201,147,240,16,201,148,240
-	data 12,169,46,208,187,169,39,208,183,169,34,208,179,169,45,208
-	data 175
+	data 120,120,0,255,162,0,160,0,236,1,207,176,54,189,0,206
+	data 240,42,201,9,240,49,201,10,240,45,201,13,240,41,201,32
+	data 144,41,201,127,176,37,201,65,144,18,201,91,144,12,201,97
+	data 144,10,201,123,176,6,41,223,208,2,9,128,153,0,205,232
+	data 200,208,197,140,7,207,96,169,32,208,241,169,46,208,237,174
+	data 9,207,160,0,236,7,207,176,55,189,0,205,201,32,144,31
+	data 201,64,144,29,201,96,144,13,201,128,144,14,201,192,144,17
+	data 41,127,76,33,193,41,191,76,33,193,41,223,76,33,193,169
+	data 32,153,0,204,232,200,192,80,144,202,169,2,141,8,207,96
+	data 192,41,176,19,169,32,192,40,176,7,153,0,204,200,76,54
+	data 193,169,1,141,8,207,96,169,32,192,80,176,7,153,0,204
+	data 200,76,73,193,169,2,141,8,207,96
