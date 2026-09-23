@@ -116,7 +116,7 @@ EQU = {
     "TMP2":    0xCF3A,
     "CF":      0xCF3E,   # full 40-slot sweep
     "OLDT":    0xCF3F,
-    "DECBUF":  0xCF3B,
+    "DECBUF":  0xC860,   # 12 bytes
     "SBUF":    0xCC00,   # up to two 40-byte screen-code lines
     # ---- REU controller ----
     "RCMD":    0xDF01,
@@ -174,6 +174,96 @@ EQU = {
     "HOLD":    0xCFA2,   # index of the oldest entry
     "ISNTSC":  0xCFA3,
     "RAWHI":   0xCFA4,
+    "UNK":     0xCFA5,   # frames with an opcode outside the protocol
+    "PBAD":    0xCFA6,   # frames rejected at the length header
+    "SPL":     0x00FD,   # splash unpack destination -- MUST be zero page
+    "SPH":     0x00FE,
+    # The kernal's rs-232 buffers are at $f7-$fa and we do not use them --
+    # we have our own receiver -- so that pair is free for a second pointer.
+    "PTR2":    0x00F7,
+    "PTR2H":   0x00F8,
+    "COLRAM":  0xD800,
+    # ---- menu state ----
+    "MNX":     0xCFB0,
+    "MNY":     0xCFB1,
+    "MNW":     0xCFB2,
+    "MNN":     0xCFB3,
+    "MNSEL":   0xCFB4,
+    "MNPTR":   0x00F9,   # -> table of string pointers; MUST be zero page
+    "MNPTRH":  0x00FA,
+    "MNTIT":   0xCFB7,   # -> title string
+    "MNTITH":  0xCFB8,
+    "MNI":     0xCFB9,
+    "MNJ":     0xCFBA,
+    "MNJ2":    0xCFBB,
+    "MNSELI":  0xCFBC,
+    "SPH2":    0xCFBD,
+    "MNROW":   0xCFBE,   # screen row scrpos works on
+    "MNIDX":   0xCFBF,   # which item we are drawing
+    "MNCOL":   0xCFC0,   # column within the box
+    "MNTMP":   0xCFC1,
+    "UIMODE":  0xCFC2,
+    "MNCLR":   0xCFC3,   # colour mnput paints with
+    # ---- contacts ----
+    # 32 slots of 64 bytes, so one (PTR),y reaches every field:
+    #   0-16 name, 17-48 public key, 49 out_path_len, 50-57 route, 58 type
+    "CONTACTS": 0x8000,
+    "NODETAB": 0xC800,   # runtime table of name pointers for the menu
+    "NCONT":   0xCFC4,
+    "CIDX":    0xCFC5,   # which contact is selected
+    "DMON":    0xCFC6,   # 1 = typing goes to a contact, not a channel
+    "DMKEY":   0xCFC7,   # 6-byte key prefix of that contact
+    "CTMP":    0xCFCE,
+    # ---- info panel ----
+    "PLBUF":   0xC900,   # eight rendered lines, 32 bytes each -- $c900..$c9ff, full
+    "PLTAB":   0xC840,   # pointer table -- must NOT sit inside PLBUF
+    "PLBASE":  0xCFF0,   # which buffer plnew fills (2 bytes)
+    "PKBUF":   0x8800,   # the picker's own lines: 10 x 32
+    "PLN":     0xCFCF,   # how many lines are in use
+    "PLCOL":   0xCFD0,   # write cursor within the current line
+    "NUML":    0xCFD1,   # 16-bit working value for decimal output
+    "NUMH":    0xCFD2,
+    "NUM2":    0xCFE4,
+    "NUM3":    0xCFE5,
+    "REM":     0xCFD3,
+    "DECN":    0xCFD4,
+    "FWVER":   0xC880,   # firmware version string from DEVICE_INFO
+    # ---- radio parameters, as reported by SELF_INFO ----
+    "RFREQ":   0xCFD5,   # 4 bytes, kHz
+    "RBW":     0xCFD9,   # 4 bytes, Hz
+    "RSF":     0xCFDD,
+    "RCR":     0xCFDE,
+    "RPWR":    0xCFDF,
+    "RMAXP":   0xCFE0,
+    "RIDX":    0xCFE1,   # which preset each cycling field is on
+    "RBIDX":   0xCFE2,
+    "RPIDX":   0xCFE3,
+    # ---- text input ----
+    # ONE copy, in ascii. The chat input keeps a second petscii copy
+    # because it echoes with CHROUT; this field draws through a2s, which
+    # wants ascii, so a petscii copy would only ever be converted twice --
+    # which is exactly what made a typed "c64" display as "C64".
+    "INPASC":  0xC8C0,
+    "INPLEN":  0xCFE6,
+    "INPOK":   0xCFE7,
+    # ---- channel editing ----
+    "CHNAME":  0x8940,   # 32-byte name, staged away from INPASC
+    "SECBUF":  0xC8E0,   # 16-byte channel secret
+    "CHIDX":   0xCFE8,
+    # ---- telemetry decoding ----
+    "LPPI":    0xCFE9,   # read position in the received frame
+    "LPPC":    0xCFEA,   # lpp channel
+    "LPPT":    0xCFEB,   # lpp type
+    "DECS":    0xCFEC,   # decimal places for plfix
+    "FRAC1":   0xCFED,
+    "FRAC2":   0xCFEE,
+    "LSIGN":   0xCFEF,   # a menu is on screen: drain, but do not print
+    "VICD018": 0xD018,
+    "VICBG":   0xD021,
+    "TXTCOL":  0x0286,   # kernal current text colour
+    "SCRRAM":  0x0400,
+    "BMCOL":   0x6400,   # splash colour map, in VIC bank 1
+    "BMBASE":  0x4000,   # splash bitmap, in VIC bank 1
     "RASTER":  0xD012,
     "VICCTL2": 0xD011,
     "KBUF":    0x0277,   # kernal keyboard buffer
@@ -189,10 +279,16 @@ main:
         lda VICCTL
         and #239
         sta VICCTL
-noblnk: lda #147
+noblnk: lda #0              ; black ground and border: this is a terminal,
+        sta VICBG           ; not a BASIC prompt
+        sta BORDER
+        lda #5              ; green text, the classic terminal look
+        sta TXTCOL
+        lda #147
         jsr CHROUT
         lda #14
         jsr CHROUT
+        jsr splash              ; logo first, then the text banner
         lda #<banner
         sta PTR
         lda #>banner
@@ -261,6 +357,356 @@ loop:   jsr poll
         lda #0
         sta READY
         jmp loop
+
+; ===== screen plumbing =================================================
+; The menu is poked straight into screen RAM. Printing it with CHROUT
+; would scroll the chat underneath and could never be lifted off again.
+; Colour RAM sits exactly $d400 above screen RAM, so one computed address
+; serves both.
+scrpos: ldy MNROW
+        lda rowlo,y
+        clc
+        adc MNX
+        sta PTR
+        sta PTR2
+        lda rowhi,y
+        adc #0              ; carry from the column add
+        sta PTRH
+        clc
+        adc #212            ; +$d400 -> the matching colour cell
+        sta PTR2H
+        rts
+
+; store A as a screen code at (PTR),y and light the colour cell
+mnput:  sta (PTR),y
+        pha
+        lda MNCLR
+        sta (PTR2),y
+        pla
+        rts
+
+; ascii -> screen code. lowercase becomes 1-26, which the lowercase
+; charset draws as lowercase; everything else is already correct.
+a2s:    cmp #97
+        bcc a2srt
+        cmp #123
+        bcs a2srt
+        sec
+        sbc #96
+a2srt:  rts
+
+; write the null-terminated string at SPL into the current row, starting
+; at column MNCOL
+mnstr:  ldy #0
+mnsl:   lda (SPL),y
+        beq mnsrt
+        jsr a2s
+        sty MNTMP
+        ldy MNCOL
+        jsr mnput
+        inc MNCOL
+        ldy MNTMP
+        iny
+        jmp mnsl
+mnsrt:  rts
+
+; ===== draw the frame ==================================================
+mnbox:  lda #14             ; light blue frame
+        sta MNCLR
+        lda MNY
+        sta MNROW
+        jsr scrpos
+        ldy #0
+        lda #112            ; top-left
+        jsr mnput
+        ldy #1
+mnbt:   cpy MNW
+        bcs mnbt2
+        lda #64             ; horizontal
+        jsr mnput
+        iny
+        jmp mnbt
+mnbt2:  lda #110            ; top-right
+        jsr mnput
+; one pair of verticals per item row
+        lda #0
+        sta MNIDX
+mnsd:   lda MNIDX
+        cmp MNN
+        bcs mnbot
+        lda MNY
+        clc
+        adc MNIDX
+        adc #1
+        sta MNROW
+        jsr scrpos
+        ldy #0
+        lda #93             ; vertical
+        jsr mnput
+        ldy MNW
+        lda #93
+        jsr mnput
+        inc MNIDX
+        jmp mnsd
+mnbot:  lda MNY
+        clc
+        adc MNN
+        adc #1
+        sta MNROW
+        jsr scrpos
+        ldy #0
+        lda #109            ; bottom-left
+        jsr mnput
+        ldy #1
+mnbb:   cpy MNW
+        bcs mnbb2
+        lda #64
+        jsr mnput
+        iny
+        jmp mnbb
+mnbb2:  lda #125            ; bottom-right
+        jsr mnput
+; the title sits in the top edge
+        lda MNY
+        sta MNROW
+        jsr scrpos
+        lda MNTIT
+        sta SPL
+        lda MNTITH
+        sta SPH
+        lda #7              ; yellow title
+        sta MNCLR
+        lda #2
+        sta MNCOL
+        jsr mnstr
+        rts
+
+; ===== draw the items, highlighting the selection ======================
+mnitems:
+        lda #0
+        sta MNIDX
+mnil:   lda MNIDX
+        cmp MNN
+        bcs mnirt
+        lda MNY
+        clc
+        adc MNIDX
+        adc #1
+        sta MNROW
+        jsr scrpos
+; clear the row first, so a shorter item leaves no debris behind it
+        lda #0
+        sta MNCLR
+        ldy #1
+mnib:   cpy MNW
+        bcs mnib2
+        lda #32
+        jsr mnput
+        iny
+        jmp mnib
+mnib2:  ldy MNIDX           ; each entry its own colour, BBS style
+        lda mnclrs,y
+        sta MNCLR
+        lda MNIDX
+        asl
+        tay
+        lda (MNPTR),y
+        sta SPL
+        iny
+        lda (MNPTR),y
+        sta SPH
+        lda #2
+        sta MNCOL
+        jsr mnstr
+        lda MNIDX
+        cmp MNSEL
+        bne mnin
+        jsr mninv
+mnin:   inc MNIDX
+        jmp mnil
+mnirt:  rts
+
+; reverse video across the row: bit 7 of a screen code
+mninv:  ldy #1
+mnvl:   cpy MNW
+        bcs mnvrt
+        lda (PTR),y
+        ora #128
+        sta (PTR),y
+        iny
+        jmp mnvl
+mnvrt:  rts
+
+; ===== run the menu ====================================================
+; in:  MNX MNY MNW MNN MNPTR MNTIT     out: MNSEL, or 255 if cancelled
+menu:   lda #1
+        sta UIMODE
+        jsr mnbox
+        jsr mnitems
+mnkey:  jsr tkey            ; test only; a no-op in a real build
+        jsr poll            ; *** the link keeps running behind the menu ***
+        lda READY
+        beq mnk2
+        jsr dispat
+        lda #0
+        sta READY
+mnk2:   jsr GETIN
+        cmp #0
+        beq mnkey
+        cmp #17             ; cursor down
+        beq mndn
+        cmp #145            ; cursor up
+        beq mnup
+        cmp #13
+        beq mnrt
+        cmp #133            ; f1 closes it again
+        beq mncan
+        jmp mnkey
+mndn:   lda MNSEL
+        clc
+        adc #1
+        cmp MNN
+        bcc mndn2
+        lda #0
+mndn2:  sta MNSEL
+        jsr mnitems
+        jmp mnkey
+mnup:   lda MNSEL
+        bne mnup2
+        lda MNN
+mnup2:  sec
+        sbc #1
+        sta MNSEL
+        jsr mnitems
+        jmp mnkey
+mncan:  lda #255
+        sta MNSEL
+mnrt:   lda #0
+        sta UIMODE
+        rts
+
+; ===== splash screen ===================================================
+; The wordmark as a hires bitmap. Hires wants $2000-$3f3f, and the packed
+; logo is the last thing in the program -- which lands inside that region
+; once the client grows. So stage the packed data up at $4000 first and
+; unpack from there; the bitmap then overwrites the original copy, which
+; by that point nothing needs. Afterwards $2000-$3fff is free again.
+splash: lda blankb
+        bne sprt                ; nothing to look at with the screen off
+
+; VIC bank 1 ($4000-$7fff). Bits 0-1 of $dd00 pick the bank and are
+; INVERTED, so %10 selects bank 1. Bit 2 of that port is our TXD, hence
+; read-modify-write.
+        lda C2PRA
+        and #252
+        ora #2
+        sta C2PRA
+
+; clear the bitmap
+        lda #0
+        sta SPL
+        lda #64                 ; $4000
+        sta SPH
+        ldx #32
+spclr:  ldy #0
+        lda #0
+spclr2: sta (SPL),y
+        iny
+        bne spclr2
+        inc SPH
+        dex
+        bne spclr
+
+; unpack straight out of the program -- no staging needed now that the
+; bitmap is nowhere near it
+        lda #<logodat
+        sta PTR
+        lda #>logodat
+        sta PTRH
+        lda #0
+        sta SPL
+        lda #64
+        sta SPH
+spunl:  ldy #0
+        lda (PTR),y
+        beq spudn
+        sta CNT
+        jsr spinc
+        ldy #0
+        lda (PTR),y
+        sta TMP
+        jsr spinc
+        ldx CNT
+spwr:   ldy #0
+        lda TMP
+        sta (SPL),y
+        inc SPL
+        bne spw2
+        inc SPH
+spw2:   dex
+        bne spwr
+        jmp spunl
+spinc:  inc PTR
+        bne spi2
+        inc PTRH
+spi2:   rts
+
+; In hires the colour comes from the video matrix: high nibble is the
+; 1-bits, low nibble the 0-bits.
+spudn:
+; In hires the colour comes from the video matrix: high nibble is the
+; 1-bits, low nibble the 0-bits. The splash is horizontal bands, so the
+; generator emits one byte per row and this fans each out across its 40
+; cells -- 25 bytes of data instead of 1000.
+        lda #<BMCOL
+        sta SPL
+        lda #>BMCOL
+        sta SPH
+        ldx #0
+spcr:   lda logocol,x
+        ldy #0
+spcr2:  sta (SPL),y
+        iny
+        cpy #40
+        bcc spcr2
+        lda SPL
+        clc
+        adc #40
+        sta SPL
+        bcc spcr3
+        inc SPH
+spcr3:  inx
+        cpx #25
+        bcc spcr
+        lda #0
+        sta BORDER
+        lda #59                 ; $3b: bitmap on, display on
+        sta VICCTL2
+        lda #144                ; $90: screen $6400, bitmap $4000
+        sta VICD018
+        ldx #140
+sphold: jsr wait1
+        dex
+        bne sphold
+; back to a normal text screen in bank 0
+        lda C2PRA
+        and #252
+        ora #3                  ; %11 -> bank 0
+        sta C2PRA
+        lda #27                 ; $1b
+        sta VICCTL2
+; $17, not $15: CB=3 is the LOWERCASE charset at $1800. $15 is the
+; uppercase/graphics set, in which lowercase ascii renders as line noise.
+        lda #23                 ; $17
+        sta VICD018
+        lda #0
+        sta VICBG
+        sta BORDER
+        lda #5
+        sta TXTCOL
+        lda #147
+        jsr CHROUT
+sprt:   rts
 
 ; ===== PAL or NTSC? ====================================================
 ; Time one whole frame with a CIA timer. PAL is 312 lines x 63 cycles =
@@ -583,7 +1029,10 @@ phi:    cmp #0
         lda #3
         sta STATE
         bne ploop
-pbad:   lda #0
+; a length byte that cannot be real means we locked onto a '>' sitting
+; inside payload data -- count it, it is the other half of the same story
+pbad:   inc PBAD
+        lda #0
         sta STATE
         beq ploop
 pdone:  rts
@@ -739,8 +1188,85 @@ dispat: lda BUF
         beq dwait
         cmp #18
         beq dchan
-        rts
+        cmp #3                  ; RESP_CODE_CONTACT
+        beq dcont
+        cmp #13                 ; RESP_CODE_DEVICE_INFO
+        beq dinfo
+        cmp #5                  ; RESP_CODE_SELF_INFO
+        beq dself
+        cmp #133                ; 0x85, push_code_login_success
+        beq dlogin
+; Not one we act on -- but is it one we RECOGNISE? An opcode outside the
+; protocol's set is the signature of a desynced parser handing us a frame
+; that started in the middle of another one. Until now those were dropped
+; in silence with no counter at all, which is precisely why r00/e00 could
+; read clean while a handshake reply went missing.
+        cmp #0
+        beq dkn
+        cmp #2                  ; contacts start
+        beq dkn
+        cmp #4                  ; end of contacts
+        beq dkn
+        cmp #5
+        beq dkn
+        cmp #9
+        beq dkn
+        cmp #10
+        beq dkn
+        cmp #13
+        beq dkn
+        cmp #136
+        beq dkn
+        cmp #138
+        beq dkn
+        inc UNK
+dkn:    rts
 dchan:  jmp rxchan
+dcont:  jmp rxcont
+; fw_version is 20 bytes at offset 60 of the device-info frame
+; SELF_INFO: 2 tx_power, 3 max_power, 48-51 freq(kHz), 52-55 bw(Hz),
+; 56 sf, 57 cr
+; Same rule as an incoming message: printing while a menu or panel is up
+; would scroll it off the top.
+dlogin: lda UIMODE
+        bne dlgrt
+        lda #<tlogok
+        sta SPL
+        lda #>tlogok
+        sta SPH
+        jmp prtsp
+dlgrt:  rts
+
+dself:  lda BUF+2
+        sta RPWR
+        lda BUF+3
+        sta RMAXP
+        ldx #0
+dsl:    cpx #4
+        bcs dsl2
+        lda BUF+48,x
+        sta RFREQ,x
+        lda BUF+52,x
+        sta RBW,x
+        inx
+        jmp dsl
+dsl2:   lda BUF+56
+        sta RSF
+        lda BUF+57
+        sta RCR
+        rts
+
+dinfo:  ldx #0
+dinf2:  cpx #19
+        bcs dinf3
+        lda CBUF+60,x
+        beq dinf3
+        sta FWVER,x
+        inx
+        jmp dinf2
+dinf3:  lda #0
+        sta FWVER,x
+        rts
 dwait:  jmp sync
 dmsg:   lda BUF+4
         cmp #40
@@ -775,13 +1301,24 @@ dmsg:   lda BUF+4
         cmp #255
         beq dmsy
         inc UT
-dmsy:   jsr refprm          ; so the +N counter updates in place
-        jmp sync
+; refprm prints, and printing at the bottom of the screen scrolls it --
+; which drags an open menu off the top. The counter is redrawn when the
+; menu closes anyway.
+dmsy:   lda UIMODE
+        bne dmsy2
+        jsr refprm          ; so the +N counter updates in place
+dmsy2:  jmp sync
 dmshow: inc MSGS
         bne dmnc
         inc MSGSH
-dmnc:   jsr shomsg
-        jmp sync
+; **Do not print while a menu is up.** The message is still collected and
+; archived -- it has to be, the radio has one shared queue -- but printing
+; it would scroll the screen and drag the menu off the top. This is the
+; same rule the picker has always needed; it just never had a flag.
+dmnc:   lda UIMODE
+        bne dmnp
+        jsr shomsg
+dmnp:   jmp sync
 dbad:   inc RJ
         jmp sync
 
@@ -1062,17 +1599,1622 @@ kbret:  jsr sendmsg
         jsr shoprm
         rts
 
-kbf1:   jmp picker
+kbf1:   jmp mainmnu
 kbf3:   jmp status
 kbf5:   jmp scrollb
 kbf7:   lda #0
         sta CC
         jmp setchan
 
+; ===== text input ======================================================
+; A one-line field in a menu frame. The text is kept in ASCII only: it
+; goes to the wire as-is, and the menu drawer converts to screen codes
+; through a2s, which is an ascii mapping. Storing petscii as well -- which
+; is what the chat input does, because it echoes with CHROUT -- meant the
+; field displayed "C64" for a typed "c64" while sending the lowercase
+; form. What you saw was not what went out.
+inpdraw:
+        lda MNY
+        clc
+        adc #1
+        sta MNROW
+        jsr scrpos
+        lda #1
+        sta MNCLR
+        ldy #1
+inpd1:  cpy MNW
+        bcs inpd2
+        lda #32
+        jsr mnput
+        iny
+        jmp inpd1
+inpd2:  ldx #0
+inpd3:  cpx INPLEN
+        bcs inpd4
+        stx CTMP
+        lda INPASC,x
+        jsr a2s
+        ldy CTMP
+        iny
+        jsr mnput
+        ldx CTMP
+        inx
+        jmp inpd3
+inpd4:  ldy INPLEN          ; a reverse space for the cursor
+        iny
+        cpy MNW
+        bcs inpd5
+        lda #160
+        jsr mnput
+inpd5:  rts
+
+; in: MNTIT = the prompt. out: INPOK = 1 if accepted, INPASC/INPLEN
+inpget: lda #1
+        sta UIMODE
+        lda #0
+        sta INPLEN
+        lda #147
+        jsr CHROUT
+        lda #4
+        sta MNX
+        lda #8
+        sta MNY
+        lda #34             ; wide enough for a 32 digit key plus frame
+        sta MNW
+        lda #1
+        sta MNN
+        jsr mnbox
+inpk:   jsr inpdraw
+inpk2:  jsr tkey
+        jsr poll            ; the link keeps running while you type
+        lda READY
+        beq inpk3
+        jsr dispat
+        lda #0
+        sta READY
+inpk3:  jsr GETIN
+        cmp #0
+        beq inpk2
+        cmp #13
+        beq inpok
+        cmp #20
+        beq inpdel
+; The function keys are 133-136, inside the printable range, so they have
+; to be caught before the range test or they land in the field as garbage
+; -- the same trap the chat input already documents.
+        cmp #133            ; f1 cancels
+        beq inpcan
+        cmp #134
+        beq inpk2
+        cmp #135
+        beq inpk2
+        cmp #136
+        beq inpk2
+        cmp #32
+        bcc inpk2
+        cmp #219            ; 193-218 are the shifted letters, and a node
+        bcs inpk2           ; name may well want them
+        ldx INPLEN
+        cpx #32             ; a 128-bit key is exactly 32 hex digits
+        bcs inpk2
+; petscii -> ascii, the same case swap the chat input uses
+        cmp #65
+        bcc inpst
+        cmp #91
+        bcc inpup
+        cmp #193
+        bcc inpst
+        cmp #219
+        bcs inpst
+        sec
+        sbc #128
+        jmp inpst
+inpup:  clc
+        adc #32
+inpst:  ldx INPLEN
+        sta INPASC,x
+        inc INPLEN
+        jmp inpk
+inpdel: lda INPLEN
+        beq inpk2
+        dec INPLEN
+        jmp inpk
+inpok:  lda #1
+        sta INPOK
+        jmp inpend
+inpcan: lda #0
+        sta INPOK
+inpend: lda #0
+        sta UIMODE
+        rts
+
+; ===== info panel ======================================================
+; Same frame as the menu, but the contents are built line by line and any
+; key dismisses it. Route and stats both print into the chat otherwise,
+; where the next incoming message scrolls them away.
+
+; start a fresh panel
+plinit: lda #0
+        sta PLN
+        lda #<PLBUF             ; the picker points this elsewhere
+        sta PLBASE
+        lda #>PLBUF
+        sta PLBASE+1
+        rts
+
+; begin a new line
+plnew:  lda #0
+        sta PLCOL
+        lda PLN
+        sta PTR
+        lda #0
+        sta PTRH
+        ldx #5
+plnsh:  asl PTR                 ; x32, 16-bit: the picker can have ten
+        rol PTRH                ; lines and 10*32 overflows a byte
+        dex
+        bne plnsh
+        lda PTR
+        clc
+        adc PLBASE
+        sta PTR
+        lda PTRH
+        adc PLBASE+1
+        sta PTRH
+; remember where it starts, for the pointer table
+        lda PLN
+        asl
+        tay
+        lda PTR
+        sta PLTAB,y
+        iny
+        lda PTRH
+        sta PLTAB,y
+        rts
+
+; append the character in A to the current line
+plchr:  ldy PLCOL
+        cpy #30
+        bcs plcrt
+        sta (PTR),y
+        inc PLCOL
+        ldy PLCOL
+        lda #0
+        sta (PTR),y             ; keep it terminated
+plcrt:  rts
+
+; append the null-terminated string at SPL
+plstr:  ldy #0
+pls2:   lda (SPL),y
+        beq pls3
+        sty CTMP
+        jsr plchr
+        ldy CTMP
+        iny
+        bne pls2
+pls3:   rts
+
+; finish the line
+plend:  inc PLN
+        rts
+
+; append A as two hex digits
+plhex:  pha
+        lsr
+        lsr
+        lsr
+        lsr
+        jsr hexdig
+        jsr plchr
+        pla
+        and #15
+        jsr hexdig
+        jsr plchr
+        rts
+
+; NUMH:NUML / 10, remainder in A -- the usual shift-and-subtract
+div10:  lda #0
+        sta REM
+        ldx #32
+d10l:   asl NUML
+        rol NUMH
+        rol NUM2
+        rol NUM3
+        rol REM
+        lda REM
+        sec
+        sbc #10
+        bcc d10n
+        sta REM
+        inc NUML
+d10n:   dex
+        bne d10l
+        lda REM
+        rts
+
+; append NUMH:NUML as decimal. div10 yields digits least-significant
+; first, so they are collected and then emitted in reverse.
+pldec:  lda #0
+        sta DECN
+pld1:   lda NUML
+        ora NUMH
+        ora NUM2
+        ora NUM3
+        beq pld2
+        jsr div10
+        clc
+        adc #48
+        ldx DECN
+        sta DECBUF,x
+        inc DECN
+        lda DECN
+        cmp #10
+        bcc pld1
+pld2:   lda DECN
+        bne pld3
+        lda #48                 ; the value was zero
+        jsr plchr
+        rts
+pld3:   ldx DECN
+pld4:   dex
+        lda DECBUF,x
+        jsr plchr
+        cpx #0
+        bne pld4
+        rts
+
+; show the panel and wait for a key
+plshow: lda #1
+        sta UIMODE
+        lda #147                ; a panel replaces the menu behind it
+        jsr CHROUT
+        lda #4
+        sta MNX
+        lda #6
+        sta MNY
+        lda #30
+        sta MNW
+        lda PLN
+        sta MNN
+        lda #<PLTAB
+        sta MNPTR
+        lda #>PLTAB
+        sta MNPTRH
+        lda #255                ; nothing highlighted: this is not a chooser
+        sta MNSEL
+        jsr mnbox
+        jsr mnitems
+plsk:   jsr poll
+        lda READY
+        beq plsk2
+        jsr dispat
+        lda #0
+        sta READY
+plsk2:  jsr GETIN
+        cmp #0
+        beq plsk
+        lda #0
+        sta UIMODE
+        rts
+
+; ===== link and radio stats ============================================
+statvw: lda #20                 ; CMD_GET_BATT_AND_STORAGE
+        sta TXBUF
+        lda #1
+        sta TXLEN
+        jsr sendfr
+        lda #0
+        sta STGBIT
+        lda #12                 ; RESP_CODE_BATT_AND_STORAGE
+        jsr waitop
+        jsr plinit
+; battery, in millivolts
+        jsr plnew
+        lda #<sbatt
+        sta SPL
+        lda #>sbatt
+        sta SPH
+        jsr plstr
+        lda BUF+1
+        sta NUML
+        lda BUF+2
+        sta NUMH
+        lda #0
+        sta NUM2
+        sta NUM3
+        jsr pldec
+        lda #<smv
+        sta SPL
+        lda #>smv
+        sta SPH
+        jsr plstr
+        jsr plend
+; storage used, in KB (low 16 bits is plenty for this display)
+        jsr plnew
+        lda #<sstor
+        sta SPL
+        lda #>sstor
+        sta SPH
+        jsr plstr
+        lda BUF+3
+        sta NUML
+        lda BUF+4
+        sta NUMH
+        lda #0
+        sta NUM2
+        sta NUM3
+        jsr pldec
+        lda #<skb
+        sta SPL
+        lda #>skb
+        sta SPH
+        jsr plstr
+        jsr plend
+; our own link counters -- the ones that actually diagnose the radio link
+        jsr plnew
+        lda #<sframes
+        sta SPL
+        lda #>sframes
+        sta SPH
+        jsr plstr
+        lda NFRM
+        jsr plhex
+        jsr plend
+        jsr plnew
+        lda #<srej
+        sta SPL
+        lda #>srej
+        sta SPH
+        jsr plstr
+        lda RJ
+        jsr plhex
+        lda #32
+        jsr plchr
+        lda UNK
+        jsr plhex
+        lda #32
+        jsr plchr
+        lda PBAD
+        jsr plhex
+        jsr plend
+        jsr plnew
+        lda #<sframe
+        sta SPL
+        lda #>sframe
+        sta SPH
+        jsr plstr
+        lda FRERR
+        jsr plhex
+        jsr plend
+        jsr plnew
+        lda #<sring
+        sta SPL
+        lda #>sring
+        sta SPH
+        jsr plstr
+        lda OVR
+        jsr plhex
+        jsr plend
+        lda #<tstats
+        sta MNTIT
+        lda #>tstats
+        sta MNTITH
+        jsr plshow
+        jmp mmshut
+
+; ===== radio configuration =============================================
+; Each line renders the live value; RETURN on it steps to the next preset.
+; "apply" writes them to the node.
+radiovw:
+        lda #1
+        sta UIMODE
+        lda #0
+        sta MNSEL
+rvdraw: jsr plinit
+; --- frequency, shown in MHz from a kHz value ---
+        jsr plnew
+        lda #<srfreq
+        sta SPL
+        lda #>srfreq
+        sta SPH
+        jsr plstr
+        lda RFREQ
+        sta NUML
+        lda RFREQ+1
+        sta NUMH
+        lda RFREQ+2
+        sta NUM2
+        lda RFREQ+3
+        sta NUM3
+        jsr pldec
+        lda #<skhz
+        sta SPL
+        lda #>skhz
+        sta SPH
+        jsr plstr
+        jsr plend
+; --- bandwidth ---
+        jsr plnew
+        lda #<srbw
+        sta SPL
+        lda #>srbw
+        sta SPH
+        jsr plstr
+        lda RBW
+        sta NUML
+        lda RBW+1
+        sta NUMH
+        lda RBW+2
+        sta NUM2
+        lda RBW+3
+        sta NUM3
+        jsr pldec
+        lda #<shz
+        sta SPL
+        lda #>shz
+        sta SPH
+        jsr plstr
+        jsr plend
+; --- spreading factor ---
+        jsr plnew
+        lda #<srsf
+        sta SPL
+        lda #>srsf
+        sta SPH
+        jsr plstr
+        lda RSF
+        sta NUML
+        lda #0
+        sta NUMH
+        sta NUM2
+        sta NUM3
+        jsr pldec
+        jsr plend
+; --- coding rate ---
+        jsr plnew
+        lda #<srcr
+        sta SPL
+        lda #>srcr
+        sta SPH
+        jsr plstr
+        lda RCR
+        sta NUML
+        lda #0
+        sta NUMH
+        sta NUM2
+        sta NUM3
+        jsr pldec
+        jsr plend
+; --- transmit power ---
+        jsr plnew
+        lda #<srpwr
+        sta SPL
+        lda #>srpwr
+        sta SPH
+        jsr plstr
+        lda RPWR
+        sta NUML
+        lda #0
+        sta NUMH
+        sta NUM2
+        sta NUM3
+        jsr pldec
+        lda #<sdbm
+        sta SPL
+        lda #>sdbm
+        sta SPH
+        jsr plstr
+        jsr plend
+; --- node name ---
+        jsr plnew
+        lda #<srname
+        sta SPL
+        lda #>srname
+        sta SPH
+        jsr plstr
+        jsr plend
+; --- actions ---
+        jsr plnew
+        lda #<srapply
+        sta SPL
+        lda #>srapply
+        sta SPH
+        jsr plstr
+        jsr plend
+        jsr plnew
+        lda #<srback
+        sta SPL
+        lda #>srback
+        sta SPH
+        jsr plstr
+        jsr plend
+
+        lda #147
+        jsr CHROUT
+        lda #4
+        sta MNX
+        lda #6
+        sta MNY
+        lda #28
+        sta MNW
+        lda PLN
+        sta MNN
+        lda #<PLTAB
+        sta MNPTR
+        lda #>PLTAB
+        sta MNPTRH
+        lda #<tradio
+        sta MNTIT
+        lda #>tradio
+        sta MNTITH
+        jsr menu
+        lda MNSEL
+        cmp #255
+        beq rvdone
+        cmp #0
+        beq rvfreq
+        cmp #1
+        beq rvbw
+        cmp #2
+        beq rvsf
+        cmp #3
+        beq rvcr
+        cmp #4
+        beq rvpwr
+        cmp #5
+        beq rvname
+        cmp #6
+        beq rvapply
+rvdone: lda #0
+        sta UIMODE
+        jmp mmshut
+
+; step frequency through the common band presets
+rvfreq: inc RIDX
+        lda RIDX
+        cmp #5
+        bcc rvf2
+        lda #0
+        sta RIDX
+rvf2:   lda RIDX
+        asl
+        asl
+        tay
+        ldx #0
+rvf3:   lda freqtab,y
+        sta RFREQ,x
+        iny
+        inx
+        cpx #4
+        bcc rvf3
+        jmp rvdraw
+; and bandwidth
+rvbw:   inc RBIDX
+        lda RBIDX
+        cmp #4
+        bcc rvb2
+        lda #0
+        sta RBIDX
+rvb2:   lda RBIDX
+        asl
+        asl
+        tay
+        ldx #0
+rvb3:   lda bwtab,y
+        sta RBW,x
+        iny
+        inx
+        cpx #4
+        bcc rvb3
+        jmp rvdraw
+; sf 7..12, cr 5..8, power in 3dBm steps up to the node's maximum
+rvsf:   inc RSF
+        lda RSF
+        cmp #13
+        bcc rvs2
+        lda #7
+        sta RSF
+rvs2:   jmp rvdraw
+rvcr:   inc RCR
+        lda RCR
+        cmp #9
+        bcc rvc2
+        lda #5
+        sta RCR
+rvc2:   jmp rvdraw
+rvpwr:  lda RPWR
+        clc
+        adc #3
+        cmp RMAXP
+        bcc rvp3
+        beq rvp3
+        lda #2
+rvp3:   sta RPWR
+        jmp rvdraw
+
+; ask for a node name and set it
+rvname: lda #<tname
+        sta MNTIT
+        lda #>tname
+        sta MNTITH
+        jsr inpget
+        lda INPOK
+        beq rvn3
+        lda INPLEN
+        beq rvn3
+        lda #8                  ; CMD_SET_ADVERT_NAME
+        sta TXBUF
+        ldx #0
+rvn2:   cpx INPLEN
+        bcs rvn2d
+        lda INPASC,x
+        sta TXBUF+1,x
+        inx
+        jmp rvn2
+rvn2d:  txa
+        clc
+        adc #1
+        sta TXLEN
+        jsr sendfr
+rvn3:   lda #1
+        sta UIMODE
+        jmp rvdraw
+
+; write them to the node: radio params, then tx power
+rvapply:
+        lda #11                 ; CMD_SET_RADIO_PARAMS
+        sta TXBUF
+        ldx #0
+rva2:   lda RFREQ,x
+        sta TXBUF+1,x
+        lda RBW,x
+        sta TXBUF+5,x
+        inx
+        cpx #4
+        bcc rva2
+        lda RSF
+        sta TXBUF+9
+        lda RCR
+        sta TXBUF+10
+        lda #11
+        sta TXLEN
+        jsr sendfr
+        lda #12                 ; CMD_SET_RADIO_TX_POWER
+        sta TXBUF
+        lda RPWR
+        sta TXBUF+1
+        lda #2
+        sta TXLEN
+        jsr sendfr
+        jsr plinit
+        jsr plnew
+        lda #<srsent
+        sta SPL
+        lda #>srsent
+        sta SPH
+        jsr plstr
+        jsr plend
+        lda #<tradio
+        sta MNTIT
+        lda #>tradio
+        sta MNTITH
+        jsr plshow
+        jmp mmshut
+
+; 869.525, 868.000, 915.000, 906.875, 433.500 -- all in kHz
+freqtab: .byte 149,68,13,0
+        .byte 160,62,13,0
+        .byte 56,246,13,0
+        .byte 123,214,13,0
+        .byte 92,157,6,0
+; 250k, 125k, 62.5k, 500k -- in Hz
+bwtab:  .byte 144,208,3,0
+        .byte 72,232,1,0
+        .byte 36,244,0,0
+        .byte 32,161,7,0
+
+; ===== contacts ========================================================; ===== contacts ========================================================
+; PTR -> contact slot for the index in A
+contptr:
+        sta PTR
+        lda #0
+        sta PTRH
+        ldx #6
+cptl:   asl PTR
+        rol PTRH
+        dex
+        bne cptl
+        lda PTR
+        clc
+        adc #<CONTACTS
+        sta PTR
+        lda PTRH
+        adc #>CONTACTS
+        sta PTRH
+        rts
+
+; RESP_CODE_CONTACT: 1-32 key, 33 type, 34 flags, 35 out_path_len,
+; 36-99 route, 100-131 name. Keep the parts we can act on.
+rxcont: lda NCONT
+        cmp #32
+        bcs rxcrt               ; table full; the rest are dropped
+        lda NCONT
+        jsr contptr
+; Take the name from the RAW frame, not the converted copy. conv() makes
+; PETSCII for CHROUT, but the menu draws through a2s, which expects ASCII
+; -- running both turned every name uppercase.
+        ldy #0
+rxcnl:  cpy #16
+        bcs rxcnd
+        lda BUF+100,y
+        beq rxcnd
+        cmp #32                 ; keep anything unprintable out of the list
+        bcc rxcdot
+        cmp #127
+        bcc rxcsv
+rxcdot: lda #46
+rxcsv:  sta (PTR),y
+        iny
+        jmp rxcnl
+rxcnd:  lda #0
+        sta (PTR),y
+; the key comes from the RAW buffer -- it is binary, not text
+        ldx #0
+rxcpl:  cpx #32
+        bcs rxcpd
+        txa
+        clc
+        adc #17
+        tay
+        lda BUF+1,x
+        sta (PTR),y
+        inx
+        jmp rxcpl
+rxcpd:  ldy #49
+        lda BUF+35              ; out_path_len; $ff means "no route, flood"
+        sta (PTR),y
+        ldx #0
+rxcrl:  cpx #8
+        bcs rxcrd
+        txa
+        clc
+        adc #50
+        tay
+        lda BUF+36,x
+        sta (PTR),y
+        inx
+        jmp rxcrl
+rxcrd:  ldy #58
+        lda BUF+33
+        sta (PTR),y
+        inc NCONT
+rxcrt:  rts
+
+; ===== node list =======================================================
+nodelst:
+        lda #1
+        sta UIMODE
+        lda #147                ; a submenu replaces the parent, it does
+        jsr CHROUT              ; not stack on top of it
+        lda #0
+        sta NCONT
+        lda #4                  ; CMD_GET_CONTACTS
+        sta TXBUF
+        lda #1
+        sta TXLEN
+        jsr sendfr
+        lda #0
+        sta STGBIT
+        lda #4                  ; RESP_CODE_END_OF_CONTACTS
+        jsr waitop
+; build the pointer table the menu reads
+        lda #0
+        sta MNIDX
+ndtl:   lda MNIDX
+        cmp NCONT
+        bcs ndtd
+        lda MNIDX
+        jsr contptr
+        lda MNIDX
+        asl
+        tay
+        lda PTR
+        sta NODETAB,y
+        iny
+        lda PTRH
+        sta NODETAB,y
+        inc MNIDX
+        jmp ndtl
+ndtd:   lda NCONT
+        bne ndshow
+        jmp mmshut              ; nothing to show
+ndshow: lda #4
+        sta MNX
+        lda #4
+        sta MNY
+        lda #30
+        sta MNW
+        lda NCONT
+        cmp #12
+        bcc ndn2
+        lda #12                 ; one screenful is plenty
+ndn2:   sta MNN
+        lda #<NODETAB
+        sta MNPTR
+        lda #>NODETAB
+        sta MNPTRH
+        lda #<tnodes
+        sta MNTIT
+        lda #>tnodes
+        sta MNTITH
+        lda #0
+        sta MNSEL
+        jsr menu
+        lda MNSEL
+        cmp #255
+        beq ndcan
+        sta CIDX
+        jmp nodeact
+ndcan:  jmp mmshut
+
+; ===== what to do with a node ==========================================
+nodeact:
+        lda #14
+        sta MNX
+        lda #10
+        sta MNY
+        lda #20
+        sta MNW
+        lda #6
+        sta MNN
+        lda #<natab
+        sta MNPTR
+        lda #>natab
+        sta MNPTRH
+        lda #<tnode1
+        sta MNTIT
+        lda #>tnode1
+        sta MNTITH
+        lda #0
+        sta MNSEL
+        jsr menu
+        lda MNSEL
+        cmp #0
+        beq namsg
+        cmp #1
+        beq nalogin
+        cmp #2
+        beq natelem
+        cmp #3
+        beq naroute
+        cmp #4
+        beq nawipe
+        jmp mmshut
+nalogin: jmp nalogi
+natelem: jmp natele
+; --- direct message: typing now goes to this contact ---
+; only the first six bytes of the key are needed to address it
+namsg:  lda CIDX
+        jsr contptr
+        ldx #0
+nam2:   cpx #6
+        bcs nam3
+        txa
+        clc
+        adc #17
+        tay
+        lda (PTR),y
+        sta DMKEY,x
+        inx
+        jmp nam2
+nam3:   lda #1
+        sta DMON
+        jmp mmshut
+; --- show the route ---
+naroute:
+        lda CIDX
+        jsr contptr
+        jsr plinit
+        jsr plnew
+        lda #<troute
+        sta SPL
+        lda #>troute
+        sta SPH
+        jsr plstr
+        ldy #49
+        lda (PTR),y
+        cmp #255
+        bne narl
+        lda #<tflood
+        sta SPL
+        lda #>tflood
+        sta SPH
+        jsr plstr
+        jsr plend
+        jmp narend
+narl:   sta CTMP
+        jsr plend
+        jsr plnew
+        lda #0
+        sta MNIDX
+narl2:  lda MNIDX
+        cmp CTMP
+        bcs narl3
+        cmp #8
+        bcs narl3
+        lda MNIDX
+        clc
+        adc #50
+        tay
+        lda (PTR),y
+        jsr plhex
+        lda #32
+        jsr plchr
+        inc MNIDX
+        jmp narl2
+narl3:  jsr plend
+narend: lda #<tnode1
+        sta MNTIT
+        lda #>tnode1
+        sta MNTITH
+        jsr plshow
+        jmp mmshut
+; --- wipe the route so the next message floods ---
+nawipe: lda CIDX
+        jsr contptr
+        lda #13                 ; CMD_RESET_PATH
+        sta TXBUF
+        ldx #0
+naw2:   cpx #32
+        bcs naw3
+        txa
+        clc
+        adc #17
+        tay
+        lda (PTR),y
+        sta TXBUF+1,x
+        inx
+        jmp naw2
+naw3:   lda #33
+        sta TXLEN
+        jsr sendfr
+        jsr plinit
+        jsr plnew
+        lda #<twiped
+        sta SPL
+        lda #>twiped
+        sta SPH
+        jsr plstr
+        jsr plend
+        lda #<tnode1
+        sta MNTIT
+        lda #>tnode1
+        sta MNTITH
+        jsr plshow
+        jmp mmshut
+
+; ===== login and telemetry =============================================
+; SEND_LOGIN carries the FULL 32-byte key (unlike a text message, which is
+; addressed by a 6-byte prefix), then the password as plain text.
+nalogi: lda #<tpass
+        sta MNTIT
+        lda #>tpass
+        sta MNTITH
+        jsr inpget
+        lda INPOK
+        bne nalg2
+        jmp mmshut
+nalg2:  lda CIDX
+        jsr contptr
+        lda #26                 ; CMD_SEND_LOGIN
+        sta TXBUF
+        jsr cpykey
+        ldx #0
+nalg3:  cpx INPLEN
+        bcs nalg4
+        lda INPASC,x
+        sta TXBUF+33,x
+        inx
+        jmp nalg3
+nalg4:  txa
+        clc
+        adc #33
+        sta TXLEN
+        jsr sendfr
+        jsr plinit
+        jsr plnew
+        lda #<tlogsent
+        sta SPL
+        lda #>tlogsent
+        sta SPH
+        jsr plstr
+        jsr plend
+        lda #<tnode1
+        sta MNTIT
+        lda #>tnode1
+        sta MNTITH
+        jsr plshow
+        jmp mmshut
+
+; copy the selected contact's 32-byte key to TXBUF+1
+cpykey: ldx #0
+ckl:    txa
+        clc
+        adc #17
+        tay
+        lda (PTR),y
+        sta TXBUF+1,x
+        inx
+        cpx #32
+        bcc ckl
+        rts
+
+; SEND_TELEMETRY_REQ: three reserved bytes, then the full key at offset 4.
+natele: lda #1
+        sta UIMODE              ; the wait below polls
+        lda CIDX
+        jsr contptr
+        lda #39
+        sta TXBUF
+        lda #0
+        sta TXBUF+1
+        sta TXBUF+2
+        sta TXBUF+3
+        ldx #0
+ntl:    txa
+        clc
+        adc #17
+        tay
+        lda (PTR),y
+        sta TXBUF+4,x
+        inx
+        cpx #32
+        bcc ntl
+        lda #36
+        sta TXLEN
+        jsr sendfr
+        lda #0
+        sta STGBIT
+        lda #139                ; 0x8b, push_code_telemetry_response
+        jsr waitop
+        lda BUF
+        cmp #139
+        beq ntok
+; nothing came back inside the timeout -- say so rather than show a blank
+        jsr plinit
+        jsr plnew
+        lda #<tnotel
+        sta SPL
+        lda #>tnotel
+        sta SPH
+        jsr plstr
+        jsr plend
+        jmp ntshow
+ntok:   jsr lppdec
+ntshow: lda #<ttelem
+        sta MNTIT
+        lda #>ttelem
+        sta MNTITH
+        jsr plshow
+        jmp mmshut
+
+; ===== Cayenne LPP ====================================================
+; Records are channel, type, then a value whose width depends on the type,
+; big-endian. An unrecognised type ends the walk: without its width there
+; is no way to find where the next record starts.
+; Frame layout: 0 push code, 1 reserved, 2-7 key prefix, 8+ the records.
+lppdec: jsr plinit
+        lda #8
+        sta LPPI
+lppl:   lda PLN
+        cmp #8
+        bcs lppd                ; the panel holds eight lines
+        ldx LPPI
+        inx                     ; a record needs at least two more bytes
+        cpx FLEN
+        bcs lppd
+        ldx LPPI
+        lda BUF,x
+        sta LPPC
+        inx
+        lda BUF,x
+        sta LPPT
+        inx
+        stx LPPI
+        jsr plnew
+        lda #35                 ; '#'
+        jsr plchr
+        lda LPPC
+        sta NUML
+        lda #0
+        sta NUMH
+        jsr pldec
+        lda #32
+        jsr plchr
+        lda LPPT
+        cmp #116
+        beq lppvlt
+        cmp #103
+        beq lpptmp
+        cmp #104
+        beq lpphum
+        cmp #117
+        beq lppcur
+        cmp #2
+        beq lppana
+        cmp #0
+        beq lppdig
+        cmp #1
+        beq lppdig
+        cmp #101
+        beq lpplux
+        cmp #115
+        beq lppbar
+        cmp #102
+        beq lppdig
+; unknown: name it and stop
+        lda #<slpptyp
+        sta SPL
+        lda #>slpptyp
+        sta SPH
+        jsr plstr
+        lda LPPT
+        sta NUML
+        lda #0
+        sta NUMH
+        jsr pldec
+        jsr plend
+lppd:   lda PLN
+        bne lppdr
+        jsr plnew               ; nothing decoded at all
+        lda #<tnotel
+        sta SPL
+        lda #>tnotel
+        sta SPH
+        jsr plstr
+        jsr plend
+lppdr:  rts
+
+; --- the types we understand ---
+lppvlt: lda #<svolt
+        jsr lpplab
+        jsr lpp16u
+        lda #2
+        sta DECS
+        jsr plfix
+        lda #<sv
+        jsr lpplab
+        jmp lppnx
+lppcur: lda #<scur
+        jsr lpplab
+        jsr lpp16u
+        lda #2
+        sta DECS
+        jsr plfix
+        lda #<sa
+        jsr lpplab
+        jmp lppnx
+lpptmp: lda #<stemp
+        jsr lpplab
+        jsr lpp16s
+        lda #1
+        sta DECS
+        jsr plfix
+        lda #<sc
+        jsr lpplab
+        jmp lppnx
+lppbar: lda #<sbaro
+        jsr lpplab
+        jsr lpp16u
+        lda #1
+        sta DECS
+        jsr plfix
+        lda #<shpa
+        jsr lpplab
+        jmp lppnx
+lppana: lda #<sana
+        jsr lpplab
+        jsr lpp16s
+        lda #2
+        sta DECS
+        jsr plfix
+        jmp lppnx
+lpplux: lda #<slux
+        jsr lpplab
+        jsr lpp16u
+        jsr pldec
+        jmp lppnx
+lpphum: lda #<shum
+        jsr lpplab
+        jsr lpp8
+        lsr                     ; reported in half percent
+        sta NUML
+        lda #0
+        sta NUMH
+        jsr pldec
+        lda #<spct
+        jsr lpplab
+        jmp lppnx
+lppdig: lda #<sdig
+        jsr lpplab
+        jsr lpp8
+        sta NUML
+        lda #0
+        sta NUMH
+        jsr pldec
+        jmp lppnx
+lppnx:  jsr plend
+        jmp lppl
+
+; A label or suffix addressed by its low byte alone; they all live in one
+; page, which build() checks.
+lpplab: sta SPL
+        lda #>svolt
+        sta SPH
+        jmp plstr
+
+; --- pulling values out, big-endian ---
+lpp8:   ldx LPPI
+        lda BUF,x
+        inc LPPI
+        rts
+lpp16u: ldx LPPI
+        lda BUF,x
+        sta NUMH
+        inx
+        lda BUF,x
+        sta NUML
+        inx
+        stx LPPI
+        lda #0
+        sta LSIGN
+        rts
+lpp16s: jsr lpp16u
+        lda NUMH
+        bpl l16rt
+        lda #1                  ; negate, and remember to print the sign
+        sta LSIGN
+        lda #0
+        sec
+        sbc NUML
+        sta NUML
+        lda #0
+        sbc NUMH
+        sta NUMH
+l16rt:  rts
+
+; NUMH:NUML scaled by 10 or 100, printed with that many decimals.
+; div10 leaves the quotient in place and the remainder in A, so the first
+; call yields the LAST digit.
+plfix:  lda LSIGN
+        beq pfx1
+        lda #45                 ; '-'
+        jsr plchr
+pfx1:   lda DECS
+        cmp #2
+        bne pfx2
+        jsr div10
+        sta FRAC2
+pfx2:   jsr div10
+        sta FRAC1
+        jsr pldec
+        lda #46                 ; '.'
+        jsr plchr
+        lda FRAC1
+        clc
+        adc #48
+        jsr plchr
+        lda DECS
+        cmp #2
+        bne pfxrt
+        lda FRAC2
+        clc
+        adc #48
+        jsr plchr
+pfxrt:  lda #0
+        sta LSIGN
+        rts
+
+; print the null-terminated string at SPL
+prtsp:  ldy #0
+psp2:   lda (SPL),y
+        beq psp3
+        jsr CHROUT
+        iny
+        bne psp2
+psp3:   rts
+
+; ===== the F1 menu =====================================================
+mainmnu:
+        lda #7
+        sta MNX
+        lda #7
+        sta MNY
+        lda #24
+        sta MNW
+        lda #6
+        sta MNN
+        lda #<mtab
+        sta MNPTR
+        lda #>mtab
+        sta MNPTRH
+        lda #<mtitle
+        sta MNTIT
+        lda #>mtitle
+        sta MNTITH
+        lda #0
+        sta MNSEL
+        jsr menu
+        lda MNSEL
+        cmp #255
+        beq mmshut
+        cmp #0
+        beq mmchan
+        cmp #1
+        beq mmnode
+        cmp #2
+        beq mmstat
+        cmp #3
+        beq mmrad
+        cmp #4
+        beq mmadd
+mmshut: lda #147
+        jsr CHROUT
+        jmp setchan             ; repaint the chat and the prompt
+mmchan: jmp picker
+mmnode: jmp nodelst
+mmstat: jmp statvw
+mmrad:  jmp radiovw
+mmadd:  jmp addchan
+
+; ===== channel add / remove ===========================================
+; SET_CHANNEL carries the secret verbatim -- the firmware does not derive
+; one from the name (it only hashes the secret to get the channel hash),
+; so the 16 bytes have to be typed in. That is the same 128-bit key the
+; phone apps show, and only the 16-byte form is accepted: the firmware
+; answers the 32-byte variant with ERR_CODE_UNSUPPORTED_CMD.
+; A leading "#" is just part of the name; nothing special is needed here.
+addchan:
+        lda #12
+        sta MNX
+        lda #8
+        sta MNY
+        lda #24
+        sta MNW
+        lda #3
+        sta MNN
+        lda #<catab
+        sta MNPTR
+        lda #>catab
+        sta MNPTRH
+        lda #<tchan
+        sta MNTIT
+        lda #>tchan
+        sta MNTITH
+        lda #0
+        sta MNSEL
+        jsr menu
+        lda MNSEL
+        cmp #0
+        beq caadd
+        cmp #1
+        beq carem
+        jmp mmshut
+
+caadd:  jsr caslot
+        lda INPOK
+        bne caa2
+        jmp mmshut
+caa2:   lda #<tcname
+        sta MNTIT
+        lda #>tcname
+        sta MNTITH
+        jsr inpget
+        lda INPOK
+        bne caa3
+        jmp mmshut
+caa3:   jsr canclr
+        ldx #0
+can2:   cpx INPLEN
+        bcs can3
+        lda INPASC,x
+        sta CHNAME,x
+        inx
+        jmp can2
+can3:   lda #<tsec
+        sta MNTIT
+        lda #>tsec
+        sta MNTITH
+        jsr inpget
+        lda INPOK
+        bne caa4
+        jmp mmshut
+caa4:   jsr inphx
+        jmp chsend
+
+; removing is the same frame with an empty name and a zero key
+carem:  jsr caslot
+        lda INPOK
+        bne car2
+        jmp mmshut
+car2:   jsr canclr
+        ldx #0
+        lda #0
+car3:   sta SECBUF,x
+        inx
+        cpx #16
+        bcc car3
+        jmp chsend
+
+; Ask which slot, 0..39. Out of range aborts: clamping to zero would
+; quietly overwrite Public, which is the one slot nobody means to touch.
+caslot: lda #<tslot
+        sta MNTIT
+        lda #>tslot
+        sta MNTITH
+        jsr inpget
+        lda INPOK
+        beq casrt
+        jsr inpnum
+        cmp #40
+        bcs casbad
+        sta CHIDX
+        rts
+casbad: lda #0
+        sta INPOK
+casrt:  rts
+
+canclr: ldx #0
+        lda #0
+canc2:  sta CHNAME,x
+        inx
+        cpx #32
+        bcc canc2
+        rts
+
+; Build the frame only here, with no poll in between: dispat answers a
+; MSG_WAITING push by sending a sync, so TXBUF cannot be held across a
+; keyboard loop.
+chsend: lda #1
+        sta UIMODE              ; waitop and chscan poll; nothing may print
+        lda #32                 ; CMD_SET_CHANNEL
+        sta TXBUF
+        lda CHIDX
+        sta TXBUF+1
+        ldx #0
+chs2:   lda CHNAME,x
+        sta TXBUF+2,x
+        inx
+        cpx #32
+        bcc chs2
+        ldx #0
+chs3:   lda SECBUF,x
+        sta TXBUF+34,x
+        inx
+        cpx #16
+        bcc chs3
+        lda #50
+        sta TXLEN
+        jsr sendfr
+        lda #0
+        sta STGBIT              ; not a handshake stage
+        jsr waitop              ; RESP_CODE_OK
+; re-scan so the picker shows the change straight away; CF forces the full
+; sweep, because a new channel may well sit above a gap
+        lda #1
+        sta CF
+        jsr chscan
+        lda #0
+        sta CF                  ; back to the quick scan, as the picker does
+        jsr plinit
+        jsr plnew
+        lda #<tchset
+        sta SPL
+        lda #>tchset
+        sta SPH
+        jsr plstr
+        jsr plend
+        lda #<tchan
+        sta MNTIT
+        lda #>tchan
+        sta MNTITH
+        jsr plshow
+        jmp mmshut
+
+; ===== reading numbers back out of the input field =====================
+; INPASC as decimal -> A. Stops at the first non-digit.
+inpnum: lda #0
+        sta CTMP
+        ldx #0
+innl:   cpx INPLEN
+        bcs innd
+        lda INPASC,x
+        sec
+        sbc #48
+        cmp #10
+        bcs innd
+        sta TMP
+        lda CTMP
+        asl
+        sta CTMP                ; n*2
+        asl
+        asl                     ; n*8
+        clc
+        adc CTMP                ; n*10
+        clc
+        adc TMP
+        sta CTMP
+        inx
+        jmp innl
+innd:   lda CTMP
+        rts
+
+; INPASC as hex digit pairs -> SECBUF. Short input leaves the rest zero,
+; which is exactly what an unencrypted channel wants.
+inphx:  ldx #0
+        lda #0
+ihz:    sta SECBUF,x
+        inx
+        cpx #16
+        bcc ihz
+        lda #0
+        sta CTMP                ; read position
+        sta MNIDX               ; write position
+ihl:    lda MNIDX
+        cmp #16
+        bcs ihd
+        ldx CTMP
+        cpx INPLEN
+        bcs ihd
+        lda INPASC,x
+        jsr hexval
+        bcs ihd
+        asl
+        asl
+        asl
+        asl
+        sta TMP
+        inc CTMP
+        ldx CTMP
+        cpx INPLEN
+        bcs ihd
+        lda INPASC,x
+        jsr hexval
+        bcs ihd
+        ora TMP
+        ldx MNIDX
+        sta SECBUF,x
+        inc MNIDX
+        inc CTMP
+        jmp ihl
+ihd:    rts
+
+; ascii hex digit -> value; carry set means it was not one
+hexval: cmp #48
+        bcc hxbad
+        cmp #58
+        bcs hxa
+        sec
+        sbc #48
+        clc
+        rts
+hxa:    cmp #97
+        bcc hxbad
+        cmp #103
+        bcs hxbad
+        sec
+        sbc #87
+        clc
+        rts
+hxbad:  sec
+        rts
+
 ; ===== send ============================================================
 sendmsg:
         lda INLEN
         beq smsrt
+        lda DMON
+        bne sendm2              ; addressed to a contact, not a channel
         lda CC
         cmp #255
         beq smsall
@@ -1102,6 +3244,39 @@ smsgo:  txa
         jsr sendfr
         jsr arcown
 smsrt:  rts
+; ----- direct message -----
+; [2][txt_type][attempt][timestamp:4][key prefix:6][text]
+sendm2: lda #2
+        sta TXBUF
+        lda #0
+        sta TXBUF+1             ; plain
+        sta TXBUF+2             ; first attempt
+        sta TXBUF+3
+        sta TXBUF+4
+        sta TXBUF+5
+        sta TXBUF+6
+        ldx #0
+sdm2:   cpx #6
+        bcs sdm3
+        lda DMKEY,x
+        sta TXBUF+7,x
+        inx
+        jmp sdm2
+sdm3:   ldx #0
+sdm4:   cpx INLEN
+        bcs sdm5
+        lda INASC,x
+        sta TXBUF+13,x
+        inx
+        jmp sdm4
+sdm5:   txa
+        clc
+        adc #13
+        sta TXLEN
+        jsr ledtx
+        jsr sendfr
+        rts
+
 ; "All" is a read-only monitor: there is no single channel to send to, and
 ; quietly defaulting to Public would post to the wrong place.
 smsall: lda #<msgpick
@@ -1187,6 +3362,22 @@ report: lda #3
         sta TXBUF,x
         inx
         lda RAWHI
+        jsr apphex
+        lda #32
+        sta TXBUF,x
+        inx
+        lda #107            ; 'k' = unrecognised opcodes
+        sta TXBUF,x
+        inx
+        lda UNK
+        jsr apphex
+        lda #32
+        sta TXBUF,x
+        inx
+        lda #112            ; 'p' = frames rejected at the length header
+        sta TXBUF,x
+        inx
+        lda PBAD
         jsr apphex
         lda #32
         sta TXBUF,x
@@ -1312,12 +3503,6 @@ tkrt:   lda JIFFY
         sta TKJ
         rts
 ; f1+pick Test | type "hi"+RETURN | f5 then a key to leave | f7 | f1+pick
-tktab:  .byte 133,50,0
-        .byte 104,105,13,0
-        .byte 135,32,0
-        .byte 136,0
-        .byte 133,49,0
-        .byte 0
 
 ; ===== cartridge LEDs ==================================================
 ; PB3-PB6 drive the lamps. Unlike the kernal's rs-232 we never touch PB1 or
@@ -2022,6 +4207,8 @@ scrollb:
         sta OLDB
         lda #2                  ; red border: you are looking at history
         sta BORDER
+        lda #1
+        sta UIMODE
         lda #0
         sta SD
 sbkey:  jsr poll                ; keep draining, same rule as the picker
@@ -2068,6 +4255,7 @@ sbnl:   jsr sbinc
         jsr appage
         jmp sbkey
 sbexit: lda #0
+        sta UIMODE
         sta SD
         jsr arcpage
         lda OLDB
@@ -2186,31 +4374,27 @@ csdone: lda #1
 ; polling while it is up: at 1200 the ring fills in seconds and an overrun
 ; does not merely lose bytes, it desyncs the frame parser. "Paused" here
 ; means paused from the DISPLAY only.
-picker: lda #147
-        jsr CHROUT
-        lda #<msgchan
-        sta PTR
-        lda #>msgchan
-        sta PTRH
-        jsr prtstr
+; ===== channel picker =================================================
+; Drawn in the same frame as every other menu. It keeps its own key loop
+; rather than calling menu(), because the digit shortcuts are worth having
+; -- "f1 2" has been how you change channel since v1 and there is no
+; reason to make people arrow to it instead.
+picker: lda #1
+        sta UIMODE
         lda CKED
         bne pkshow
+        lda #147
+        jsr CHROUT
         lda #<msgscan
         sta PTR
         lda #>msgscan
         sta PTRH
         jsr prtstr
         jsr chscan
-pkshow: lda #147
-        jsr CHROUT
-        lda #<msgchan
-        sta PTR
-        lda #>msgchan
-        sta PTRH
-        jsr prtstr
-; build the menu: map digits onto whatever slots actually have names, so a
-; sparse setup still gets a dense list. "All" is synthetic, always first.
-        lda #255
+
+; Map the list positions onto whatever slots actually have names, so a
+; sparse radio still gets a dense list. "All" is synthetic and always 0.
+pkshow: lda #255
         sta PKMAP
         lda #1
         sta NPICK
@@ -2233,84 +4417,139 @@ pkbl:   lda SCANI
         inc NPICK
 pkbn:   inc SCANI
         jmp pkbl
-pkbd:   lda #0
+
+; ----- render each row into the picker's own buffer -----
+pkbd:   jsr plinit
+        lda #<PKBUF
+        sta PLBASE
+        lda #>PKBUF
+        sta PLBASE+1
+        lda #0
         sta SCANI
-pkdl:   lda SCANI
+pkrl:   lda SCANI
         cmp NPICK
-        bcs pkdd
-        lda #32
-        jsr CHROUT
-        lda SCANI
-        clc
-        adc #48
-        jsr CHROUT
-        lda #32
-        jsr CHROUT
-        lda #32
-        jsr CHROUT
+        bcs pkrd
+; the name address has to be worked out BEFORE plnew, which claims PTR
         ldx SCANI
         lda PKMAP,x
         cmp #255
-        bne pkdnm
-        lda #65
-        jsr CHROUT
-        lda #76
-        jsr CHROUT
-        lda #76
-        jsr CHROUT
-        jmp pkdmk
-pkdnm:  jsr chnptr
+        beq pkral
+        jsr chnptr
+        lda PTR
+        sta SPL
+        lda PTRH
+        sta SPH
+        jmp pkrn
+pkral:  lda #<sall
+        sta SPL
+        lda #>sall
+        sta SPH
+pkrn:   jsr plnew
+        lda SCANI               ; "0 " and so on, so the digits still read
+        clc
+        adc #48
+        jsr plchr
+        lda #32
+        jsr plchr
         ldy #0
-pkdnl:  lda (PTR),y
-        beq pkdcn
-        jsr CHROUT
+pknl:   cpy #16
+        bcs pknd
+        sty CTMP
+        lda (SPL),y
+        beq pknd
+        jsr p2a
+        jsr plchr
+        ldy CTMP
         iny
-        cpy #18
-        bcc pkdnl
-pkdcn:  ldx SCANI
+        jmp pknl
+; unread count, if any
+pknd:   ldx SCANI
         lda PKMAP,x
+        cmp #255
+        beq pkrmk
         tax
         lda CUNR,x
-        beq pkdmk
-        pha
+        beq pkrmk
+        sta NUML
+        lda #0
+        sta NUMH
         lda #32
-        jsr CHROUT
-        lda #40             ; '('
-        jsr CHROUT
-        pla
-        jsr dec8
-        sta TMP
-        lda #3
-        sec
-        sbc TMP
-        tay
-pkdcl:  lda DECBUF,y
-        jsr CHROUT
-        iny
-        cpy #3
-        bcc pkdcl
-        lda #41             ; ')'
-        jsr CHROUT
-pkdmk:  ldx SCANI
+        jsr plchr
+        lda #40                 ; '('
+        jsr plchr
+        jsr pldec
+        lda #41                 ; ')'
+        jsr plchr
+; a star marks where you are, which is not the same as where the cursor is
+pkrmk:  ldx SCANI
         lda PKMAP,x
         cmp CC
-        bne pkdnx
+        bne pkrnx
         lda #32
-        jsr CHROUT
-        lda #42             ; '*' marks where you are
-        jsr CHROUT
-pkdnx:  lda #13
-        jsr CHROUT
+        jsr plchr
+        lda #42
+        jsr plchr
+pkrnx:  jsr plend
         inc SCANI
-        jmp pkdl
-pkdd:   lda #13
+        jmp pkrl
+
+; ----- draw it -----
+pkrd:   lda #147
         jsr CHROUT
-        lda #<msgfoot
-        sta PTR
-        lda #>msgfoot
-        sta PTRH
-        jsr prtstr
-pkkey:  jsr poll
+        lda #4
+        sta MNX
+        lda #3
+        sta MNY
+        lda #28
+        sta MNW
+        lda NPICK
+        sta MNN
+        lda #<PLTAB
+        sta MNPTR
+        lda #>PLTAB
+        sta MNPTRH
+        lda #<tchans
+        sta MNTIT
+        lda #>tchans
+        sta MNTITH
+; open on the channel you are already in
+        lda #0
+        sta MNSEL
+        lda #0
+        sta SCANI
+pkfl:   lda SCANI
+        cmp NPICK
+        bcs pkfd
+        ldx SCANI
+        lda PKMAP,x
+        cmp CC
+        bne pkfn
+        lda SCANI
+        sta MNSEL
+        jmp pkfd
+pkfn:   inc SCANI
+        jmp pkfl
+pkfd:   jsr mnbox
+        jsr mnitems
+; the hint goes under the frame
+        lda MNY
+        clc
+        adc MNN
+        adc #3
+        sta MNROW
+        jsr scrpos
+        lda #12
+        sta MNCLR
+        lda #<pkhint
+        sta SPL
+        lda #>pkhint
+        sta SPH
+        lda #1
+        sta MNCOL
+        jsr mnstr
+
+pkkey:  jsr tkey
+        jsr poll
         lda READY
         beq pknk
         jsr dispat
@@ -2319,13 +4558,19 @@ pkkey:  jsr poll
 pknk:   jsr GETIN
         cmp #0
         beq pkkey
+        cmp #17                 ; cursor down
+        beq pkdn
+        cmp #145                ; cursor up
+        beq pkup
+        cmp #13
+        beq pktake
         cmp #133
         beq pkend
-        cmp #82             ; 'r'
+        cmp #82                 ; 'r' rescans
         beq pkres
-        cmp #210            ; shift-r
+        cmp #210
         beq pkres
-        cmp #48
+        cmp #48                 ; the digit shortcuts, as before
         bcc pkkey
         cmp #58
         bcs pkkey
@@ -2333,18 +4578,58 @@ pknk:   jsr GETIN
         sbc #48
         cmp NPICK
         bcs pkkey
-        tax
+        sta MNSEL
+pktake: ldx MNSEL
         lda PKMAP,x
         sta CC
-pkend:  lda #147
+pkend:  lda #0
+        sta UIMODE
+        lda #147
         jsr CHROUT
         jmp setchan
+pkdn:   lda MNSEL
+        clc
+        adc #1
+        cmp NPICK
+        bcc pkdn2
+        lda #0
+pkdn2:  sta MNSEL
+        jsr mnitems
+        jmp pkkey
+pkup:   lda MNSEL
+        bne pkup2
+        lda NPICK
+pkup2:  sec
+        sbc #1
+        sta MNSEL
+        jsr mnitems
+        jmp pkkey
 pkres:  lda #1
         sta CF
         jsr chscan
         lda #0
         sta CF
         jmp pkshow
+
+; PETSCII back to ASCII, the inverse of conv().
+;
+; CHNAM has to stay PETSCII: the bottom prompt and the "[channel]" prefix
+; on archived lines both print it with CHROUT. The menu draws through a2s,
+; which wants ASCII. Converting the handful of characters here is cheaper
+; than keeping a second copy of every channel name -- and running both
+; conversions, which is what made the names come out uppercase.
+p2a:    cmp #65
+        bcc p2art
+        cmp #91
+        bcs p2a2
+        ora #32                 ; petscii lowercase -> ascii lowercase
+        rts
+p2a2:   cmp #193
+        bcc p2art
+        cmp #219
+        bcs p2art
+        and #127                ; petscii shifted -> ascii uppercase
+p2art:  rts
 
 ; ===== switch channel ==================================================
 setchan:
@@ -2623,7 +4908,7 @@ pyastart: .byte 1,0,0,0,0,0,0,0,67,54,52
 pyquery:  .byte 22,3
 pychan:   .byte 31,0
 pytime:   .byte 5
-banner: .text "meshcore 64  v2.01"
+banner: .text "meshcore 64  v2.2 beta"
         .byte 13,0
 msgcon: .text "connecting..."
         .byte 13,0
@@ -2631,23 +4916,275 @@ msgrdy: .text "connected."
         .byte 13,13,0
 msgpick: .text "pick a channel to send"
         .byte 13,0
-msgchan: .text "channels"
-        .byte 13,13,0
 msgscan: .text "scanning..."
-        .byte 13,0
-msgfoot: .text "0-9 select   r rescan   f1 cancel"
         .byte 13,0
 msgstat: .text "frames/rej/hw "
         .byte 0
+mtitle: .text " meshcore 64 "
+        .byte 0
+mi0:    .text "channels"
+        .byte 0
+mi1:    .text "nodes"
+        .byte 0
+mi2:    .text "stats"
+        .byte 0
+mi3:    .text "radio config"
+        .byte 0
+mi4:    .text "add/remove channel"
+        .byte 0
+mi5:    .text "close"
+        .byte 0
+mtab:   .word mi0,mi1,mi2,mi3,mi4,mi5
+; one colour per entry: red, yellow, cyan, purple, light green, light blue
+mnclrs: .byte 2,7,3,4,13,14,2,7,3,4,13,14,2,7,3,4
+tchans: .text " channels "
+        .byte 0
+sall:   .text "all"
+        .byte 0
+pkhint: .text "0-9 pick  return  r rescan  f1 back"
+        .byte 0
+ca0:    .text "add or edit channel"
+        .byte 0
+ca1:    .text "remove channel"
+        .byte 0
+ca2:    .text "back"
+        .byte 0
+catab:  .word ca0,ca1,ca2
+tchan:  .text " channel "
+        .byte 0
+tslot:  .text " slot number 0-39 "
+        .byte 0
+tcname: .text " channel name "
+        .byte 0
+tsec:   .text " key, 32 hex digits "
+        .byte 0
+tchset: .text "channel updated"
+        .byte 0
+tnodes: .text " nodes "
+        .byte 0
+tnode1: .text " node "
+        .byte 0
+na0:    .text "send message"
+        .byte 0
+na1:    .text "log in..."
+        .byte 0
+na4:    .text "telemetry"
+        .byte 0
+na5:    .text "show route"
+        .byte 0
+na2:    .text "wipe route (flood)"
+        .byte 0
+na3:    .text "back"
+        .byte 0
+natab:  .word na0,na1,na4,na5,na2,na3
+tpass:  .text " password "
+        .byte 0
+ttelem: .text " telemetry "
+        .byte 0
+tlogsent: .text "login sent - watch for reply"
+        .byte 0
+tlogok: .text "login accepted"
+        .byte 13,0
+tnotel: .text "no telemetry came back"
+        .byte 0
+; every LPP label is addressed by its low byte alone, so they must all
+; sit in one page -- the assembler would not warn if they did not
+svolt:  .text "voltage "
+        .byte 0
+scur:   .text "current "
+        .byte 0
+stemp:  .text "temp "
+        .byte 0
+sbaro:  .text "pressure "
+        .byte 0
+sana:   .text "analog "
+        .byte 0
+slux:   .text "light "
+        .byte 0
+shum:   .text "humidity "
+        .byte 0
+sdig:   .text "digital "
+        .byte 0
+sv:     .text " v"
+        .byte 0
+sa:     .text " a"
+        .byte 0
+sc:     .text " c"
+        .byte 0
+shpa:   .text " hpa"
+        .byte 0
+spct:   .text " pct"
+        .byte 0
+slpptyp: .text "type "
+        .byte 0
+troute: .text "route: "
+        .byte 0
+tflood: .text "none - will flood"
+        .byte 0
+tstats: .text " stats "
+        .byte 0
+tradio: .text " radio "
+        .byte 0
+sbatt:  .text "battery "
+        .byte 0
+smv:    .text " mv"
+        .byte 0
+sstor:  .text "storage "
+        .byte 0
+skb:    .text " kb"
+        .byte 0
+sframes: .text "frames  "
+        .byte 0
+srej:   .text "rej/unk/hdr "
+        .byte 0
+sframe: .text "framing "
+        .byte 0
+sring:  .text "ring hw "
+        .byte 0
+sfw:    .text "fw "
+        .byte 0
+svid:   .text "video "
+        .byte 0
+spal:   .text "pal"
+        .byte 0
+sntsc:  .text "ntsc"
+        .byte 0
+sbaud:  .text "link 2400 baud"
+        .byte 0
+srfreq: .text "freq  "
+        .byte 0
+srbw:   .text "bw    "
+        .byte 0
+srsf:   .text "sf    "
+        .byte 0
+srcr:   .text "cr    "
+        .byte 0
+srpwr:  .text "power "
+        .byte 0
+srname: .text "node name..."
+        .byte 0
+tname:  .text " node name "
+        .byte 0
+srapply: .text "apply to node"
+        .byte 0
+srback: .text "back"
+        .byte 0
+srsent: .text "radio settings sent"
+        .byte 0
+skhz:   .text " khz"
+        .byte 0
+shz:    .text " hz"
+        .byte 0
+sdbm:   .text " dbm"
+        .byte 0
+sreu:   .text "reu "
+        .byte 0
+snone:  .text "none"
+        .byte 0
+twiped: .text "route wiped - next msg floods"
+        .byte 0
+
+; ===== splash artwork ==================================================
+; Generated by mksplash.py: the MeshCore wordmark, "64" in the character
+; ROM's own font, and a drawing of a breadbin. RLE (count, value) pairs,
+; zero count ends it. Unpacked to $4000 in VIC bank 1, well clear of the
+; program.
+; screen RAM address of each row, so the menu never multiplies
+rowlo:  .byte 0,40,80,120,160,200,240,24,64,104,144,184,224,8,48,88,128,168,208,248,32,72,112,152,192
+rowhi:  .byte 4,4,4,4,4,4,4,5,5,5,5,5,5,6,6,6,6,6,6,6,7,7,7,7,7
+
+
 """
 
+# 2400 is THE speed. The slower rates are kept only because the bit period
+# is a build-time constant either way, so they cost nothing and leave a way
+# back if real hardware disagrees with the emulator -- they are not tested,
+# because a run that passes at 2400 cannot fail at 600 for timing reasons.
 RATES = {7: 600, 8: 1200, 10: 2400, 11: 4800, 12: 9600}
+DEFAULT_CTRL = 10               # 2400 baud
 
 
 NTSC = 1022727
 
 
-def build(ctrl=7, out=OUT, blank=0, clock=PAL, testk=0, latadj=275):
+# Scripted keypresses for the VICE tests, by testk value. Each inner list
+# is one BATCH: the feeder stuffs up to eight at a time into the kernal's
+# own buffer, because a UI loop that opens mid-batch has to find whatever
+# it needs already sitting there. Keys are PETSCII as GETIN returns them:
+# 133 = f1, 17/145 = cursor down/up, 13 = return, 20 = delete.
+TESTKEYS = {
+    # The regression script: f1, "channels", pick channel 2, type "hi",
+    # f5 scrollback then out, f7, and back to channel 1. F1 now opens a
+    # menu before the picker, hence the extra RETURN.
+    1: [[133, 13, 50], [104, 105, 13], [135, 32], [136], [133, 13, 49]],
+    # f1 -> add/remove channel -> add -> slot 5, name "mych", key "abcd"
+    2: [[133, 17, 17, 17, 17, 13], [13], [53, 13],
+        [77, 89, 67, 72, 13], [65, 66, 67, 68, 13]],
+    # f1 -> nodes -> first contact -> show route. No dismissing key: the
+    # panel has to still be up when the screenshot is taken.
+    3: [[133, 17, 13], [13], [17, 17, 17, 13]],
+    # f1 -> nodes -> first contact -> telemetry
+    4: [[133, 17, 13], [13], [17, 17, 13]],
+    # f1 -> nodes -> first contact -> log in, password "pass"
+    5: [[133, 17, 13], [13], [17, 13], [80, 65, 83, 83, 13]],
+    # f1 -> nodes -> first contact -> send message, then type "hi"
+    6: [[133, 17, 13], [13], [13], [72, 73, 13]],
+    # f1 -> radio config -> node name -> type "c64"
+    7: [[133, 17, 17, 17, 13], [145, 145, 145, 13], [67, 54, 52, 13]],
+    # ---- documentation screenshots ----
+    # Each of these STOPS on the screen it wants photographed. Menus and
+    # panels wait for a key, and the feeder is exhausted, so the screen
+    # stays up however long the run goes on. A panel does not call tkey at
+    # all, so a script that ends in one cannot advance past it.
+    10: [[133]],                                   # the f1 menu
+    11: [[133, 13]],                               # channel picker
+    12: [[133, 17, 13]],                           # node list
+    13: [[133, 17, 13], [13]],                     # what to do with a node
+    14: [[133, 17, 17, 13]],                       # stats
+    15: [[133, 17, 17, 17, 13]],                   # radio config
+    16: [[133, 17, 17, 17, 13], [145, 145, 145, 13],
+         [67, 54, 52]],                            # node name, mid-typing
+    17: [[133, 17, 13], [13], [17, 17, 17, 13]],   # show route
+    18: [[133, 17, 17, 17, 17, 13], [13]],         # channel slot prompt
+}
+
+
+def keytable(testk):
+    rows = TESTKEYS.get(testk, [])
+    out = ["tktab:"]
+    for batch in rows:
+        assert len(batch) <= 8, "a batch cannot exceed the kernal buffer"
+        out.append("        .byte " + ",".join(str(k) for k in batch) + ",0")
+    out.append("        .byte 0")
+    return "\n".join(out) + "\n"
+
+
+def artwork():
+    """
+    The splash bitmap and its colour map, straight off disk.
+
+    mksplash.py regenerates them whenever the art changes; appending the
+    bytes here keeps several thousand .byte lines out of the source and
+    means the two can never drift apart.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    def blk(fn, label):
+        data = open(os.path.join(here, fn), "rb").read()
+        out = ["%s:" % label]
+        for i in range(0, len(data), 16):
+            out.append("        .byte "
+                       + ",".join(str(b) for b in data[i:i + 16]))
+        return "\n".join(out) + "\n"
+
+    return ("\n; one foreground colour per screen row\n"
+            + blk("logocol.bin", "logocol")
+            + "\n; the bitmap itself, RLE (count, value)\n"
+            + blk("logo.bin", "logodat"))
+
+
+def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
+          latadj=275):
     baud = RATES[ctrl]
     bit = int(round(clock / float(baud)))
     # 1.5 bit times to reach the centre of data bit 0, less a rough
@@ -2664,8 +5201,41 @@ def build(ctrl=7, out=OUT, blank=0, clock=PAL, testk=0, latadj=275):
     # LATADJ lets that be swept, because getting it wrong shows up as
     # samples drifting toward a bit edge where badline jitter tips them over.
     half = int(round(bit * 1.5)) - latadj
-    code, syms = assemble(SRC, ORG, EQU)
+    code, syms = assemble(SRC + keytable(testk) + artwork(), ORG, EQU)
     code = bytearray(code)
+    # Buffers that are indexed, not just read, and so will corrupt a
+    # neighbour rather than fail loudly if they collide. PKBUF sitting
+    # immediately after CONTACTS is exactly the adjacency worth checking.
+    regions = [("CONTACTS", 32 * 64), ("PKBUF", 10 * 32),
+               ("CHNAM", 40 * 18), ("NODETAB", 32 * 2), ("PLTAB", 10 * 2),
+               ("DECBUF", 12), ("CHNAME", 32), ("FWVER", 20),
+               ("INPASC", 32), ("SECBUF", 16),
+               ("PLBUF", 8 * 32), ("RBUF", 256), ("TXBUF", 256),
+               ("SBUF", 256), ("CBUF", 256), ("BUF", 256),
+               ("BMBASE", 8000), ("BMCOL", 1000)]
+    spans = sorted((EQU[n], EQU[n] + sz, n) for n, sz in regions)
+    for (a0, a1, an), (b0, b1, bn) in zip(spans, spans[1:]):
+        if a1 > b0:
+            raise ValueError(
+                "%s ($%04X..$%04X) overlaps %s ($%04X..$%04X)"
+                % (an, a0, a1 - 1, bn, b0, b1 - 1))
+
+    # The LPP decoder addresses its labels by low byte alone, with the
+    # high byte taken from svolt, so they have to share one page. Nothing
+    # in the assembler would catch it if an edit pushed one over.
+    lpp = ["svolt", "scur", "stemp", "sbaro", "sana", "slux", "shum",
+           "sdig", "sv", "sa", "sc", "shpa", "spct", "slpptyp"]
+    pages = set(syms[n] >> 8 for n in lpp)
+    if len(pages) != 1:
+        raise ValueError("lpp labels straddle pages: "
+                         + ", ".join("%s=$%04X" % (n, syms[n]) for n in lpp))
+    # The splash artwork is what makes this worth checking: it roughly
+    # doubled the image, and the bitmap it unpacks into sits at $4000.
+    end = ORG + len(code)
+    if end > EQU["BMBASE"]:
+        raise ValueError(
+            "program ends at $%04X, past the splash bitmap at $%04X"
+            % (end, EQU["BMBASE"]))
     nbit = int(round(NTSC / float(baud)))
     nhalf = int(round(nbit * 1.5)) - latadj
     vals = [("btlo", bit & 0xFF), ("bthi", bit >> 8),
@@ -2684,7 +5254,7 @@ def build(ctrl=7, out=OUT, blank=0, clock=PAL, testk=0, latadj=275):
 
 
 if __name__ == "__main__":
-    ctrl = int(sys.argv[1]) if len(sys.argv) > 1 else 7
+    ctrl = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_CTRL
     out = sys.argv[2] if len(sys.argv) > 2 else OUT
     blank = int(sys.argv[3]) if len(sys.argv) > 3 else 0
     testk = int(sys.argv[4]) if len(sys.argv) > 4 else 0

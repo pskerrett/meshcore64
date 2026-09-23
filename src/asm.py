@@ -174,6 +174,16 @@ def assemble(src, org, equates=None):
 
     # Indices of branches that need relaxing to 5 bytes. Sizing and range
     # depend on each other, so iterate until the set stops growing.
+    # **Refuse duplicate labels.** Silently letting the later definition win
+    # means every jump to that name lands in the wrong routine, and the
+    # symptom is a hang somewhere unrelated. Cost hours once; never again.
+    seen = set()
+    for label, mnem, mode, operand in lines:
+        if label:
+            if label in seen:
+                raise ValueError("duplicate label: %r" % label)
+            seen.add(label)
+
     longbr = set()
     for _ in range(64):
         syms = dict(equates or {})

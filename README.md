@@ -1,30 +1,27 @@
 # MeshCore 64
 
-> ### 🧪 You are on the `v2.0-beta` branch
+> ### 🧪 You are on the `v2.2-beta` branch
 >
-> **v2.01** is the client rewritten entirely in machine language with its
-> own RS-232 driver, reaching **2400 baud** where v1.x tops out at 600.
-> **[Read V2.md →](V2.md)**
+> **v2.2** is the client rewritten entirely in machine language with its
+> own RS-232 driver, running at **2400 baud**, with a full menu-driven
+> interface: node lists, direct messages, telemetry, radio configuration
+> and channel editing. **[Read V2.2.md →](V2.2.md)**
 >
 > It is a beta and has only been tested in an emulator. The stable client
 > is the BASIC one on [`main`](https://github.com/pskerrett/meshcore64/tree/main).
-> Hardware setup, firmware flashing and the companion patch below are
-> unchanged and apply to both.
-
+>
+> **Flash the 2400-baud firmware** (`meshcore64-ble-2400-*.bin`). v2.2
+> talks at 2400 and nothing else; the 600-baud image pairs with v1.2d on
+> `main` and will not connect to this.
 
 A Commodore 64 chat client for the MeshCore mesh network.
 
 A real C64 joins a LoRa mesh and sends and receives messages on it, using
 **bit-zeal's mesh modem cartridge** — the Heltec V3 (ESP32-S3) carrier that
 brings a LoRa radio onto the C64 user port. The C64 talks to the radio over
-that port at 600 baud.
+that port at 2400 baud.
 
-```
-MeshCore 64   v1.2c
-radio fw: mc64 1.17.1
-connected as 59800697 on Public
-f1 channels   f7 public
-```
+![The MeshCore 64 splash](shots/splash.png)
 
 ---
 
@@ -52,13 +49,85 @@ This is an independent, unofficial port and is not affiliated with Jim_64.
 
 ## What it does
 
-- **Chat on the mesh.** Type, press RETURN, it goes out over LoRa. Incoming
-  messages appear as they arrive.
-- **Channels.** `F1` lists the channels configured on your radio; pick one
-  with a digit and everything — display and sending — scopes to it. `F7`
-  jumps straight back to Public.
-- **Tells you what you're missing.** `Public +3>` means 3 messages are
-  waiting on other channels. Switch to one and they're replayed.
+Everything hangs off one pop-up menu on `F1`. The link keeps running behind
+it — messages still arrive and are archived while you are in a menu, they
+just do not print over the top of it.
+
+![The F1 menu](shots/menu.png)
+
+### Chat and channels
+
+Type, press RETURN, it goes out over LoRa. Incoming messages appear as they
+arrive, and `Public +3>` means three messages are waiting on other
+channels — switch to one and they are replayed.
+
+![Channel picker](shots/channels.png)
+
+**Add, edit and remove channels** from the C64 itself. A channel needs a
+name and its 128-bit key, typed as 32 hex digits — the same key your phone
+app shows. Leave the key short and the rest is zero-filled, which is what
+an unencrypted channel wants. A name starting with `#` is just a name.
+
+![Adding a channel](shots/channeladd.png)
+
+### Nodes
+
+The contacts your radio knows about, pulled off the node on demand.
+
+![Node list](shots/nodes.png)
+
+Pick one and you can message it directly, log in to it, ask it for
+telemetry, or look at how packets are reaching it.
+
+![What you can do with a node](shots/nodeactions.png)
+
+**Direct messages.** Choose "send message" and what you type now goes to
+that contact instead of the channel.
+
+**Show route** displays the stored path hop by hop, or tells you there
+isn't one and the next message will flood the mesh.
+
+![Show route](shots/route.png)
+
+**Wipe route** throws the stored path away, so the next message floods and
+the mesh finds a fresh one. Useful when a repeater has moved or gone away
+and messages have quietly stopped arriving.
+
+**Log in** prompts for the node's password and sends it.
+
+![Logging in to a node](shots/login.png)
+
+**Telemetry** asks the node for its sensors and decodes the reply —
+battery voltage, temperature, humidity, pressure, light, current.
+
+![Telemetry](shots/telemetry.png)
+
+### Radio configuration
+
+The settings a phone app would write over Bluetooth, done from the C64:
+frequency, bandwidth, spreading factor, coding rate, transmit power and the
+node's advertised name. The screen opens showing what your node is
+*actually* set to — it is read from the node at connect, not remembered —
+and RETURN steps each field through its presets. "apply to node" writes
+them back.
+
+![Radio configuration](shots/radio.png)
+
+**Changing the node name** is on the same screen. Pick "node name...",
+type, RETURN.
+
+![Setting the node name](shots/nodename.png)
+
+### Stats
+
+Battery and storage from the node, and the client's own link counters —
+frames received and rejected, framing errors, how full the receive buffer
+ever got. These are what tell you whether the link is healthy.
+
+![Stats](shots/stats.png)
+
+### And the rest
+
 - **Lights up the cartridge.** All six lamps sweep at startup, then a
   ripple on every incoming message and a flash when you send.
 - **Scrolls back, with a RAM Expansion Unit.** `F5` pages back through
@@ -66,8 +135,8 @@ This is an independent, unofficial port and is not affiliated with Jim_64.
   The border turns red while you are looking at history. Without an REU
   the client behaves exactly as it does otherwise, and `F5` is not
   offered.
-
-Not yet: contacts, direct messages, or repeater admin. Channels only.
+- **Knows whether it is a PAL or an NTSC machine** and times the serial
+  link accordingly, measured at boot rather than assumed.
 
 ---
 
@@ -77,8 +146,8 @@ Not yet: contacts, direct messages, or repeater admin. Channels only.
 |---|---|
 | A Commodore 64 | any model, real not emulated |
 | bit-zeal's mesh modem cartridge | the Heltec V3 / ESP32-S3 board that carries the LoRa radio onto the user port |
-| The firmware image | `meshcore64-1.17.1-0679dbef-merged.bin` |
-| The program | `meshcore64.prg`, `meshcore64.d64` (disk), or `meshcore64.crt` (cartridge) |
+| The firmware image | `meshcore64-ble-2400-1.17.1-0679dbef-merged.bin` |
+| The program | `meshcore64-v2.prg`, or `meshcore64-v2.crt` (cartridge) |
 
 ---
 
@@ -123,12 +192,15 @@ mesh modem is on the user port, so the expansion port is free for it.
 
 ## Known limits
 
-- **The link carries 60 bytes per second, total** — shared with everything
-  the radio reports, not just your messages. A short message is about a
-  second on an idle mesh, longer on a busy one.
+- **None of v2.x has run on real hardware.** Everything here was tested in
+  VICE against a simulated radio. The constant most likely to need
+  adjusting on a real machine is the NMI latency allowance in the serial
+  driver — see [V2.2.md](V2.2.md).
+- **The link carries 240 bytes per second, total** — shared with everything
+  the radio reports, not just your messages.
 - **The radio is chatty.** It reports *every* LoRa packet it overhears,
-  whether or not it's addressed to you, and on a 600-baud link that's the
-  main reason a busy mesh feels slow. 
+  whether or not it's addressed to you, which is the main reason a busy
+  mesh feels slow.
 - **Scrollback needs an REU.** With a RAM Expansion Unit, every message is
   archived per channel and `F5` pages back through it. Without one,
   switching channels still replays what you missed, but earlier history
@@ -136,6 +208,8 @@ mesh modem is on the user port, so the expansion port is free for it.
 - **Channel slots can have gaps.** The channel list normally stops scanning
   after a few empty slots, which is fast but misses a channel sitting above
   a gap. Press `r` in the list to sweep all 40 (about 40 seconds).
+- **Text fields hold 32 characters**, which is exactly a 128-bit channel
+  key in hex. Longer node names are truncated.
 
 ---
 ---
