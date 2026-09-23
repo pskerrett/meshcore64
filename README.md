@@ -121,7 +121,63 @@ Three ways to run it. Load `meshcore64.prg` the usual way; or put
 `meshcore64.crt` on a cartridge and it runs the moment you switch on — the
 mesh modem is on the user port, so the expansion port is free for it.
 
-### Building a cartridge
+## Known limits
+
+- **The link carries 60 bytes per second, total** — shared with everything
+  the radio reports, not just your messages. A short message is about a
+  second on an idle mesh, longer on a busy one.
+- **The radio is chatty.** It reports *every* LoRa packet it overhears,
+  whether or not it's addressed to you, and on a 600-baud link that's the
+  main reason a busy mesh feels slow. 
+- **Scrollback needs an REU.** With a RAM Expansion Unit, every message is
+  archived per channel and `F5` pages back through it. Without one,
+  switching channels still replays what you missed, but earlier history
+  isn't kept and `F5` is not offered.
+- **Channel slots can have gaps.** The channel list normally stops scanning
+  after a few empty slots, which is fast but misses a channel sitting above
+  a gap. Press `r` in the list to sweep all 40 (about 40 seconds).
+
+---
+---
+
+# Technical reference
+
+*Everything above is what you need to use MeshCore 64. Everything below is
+how it is built and why it works the way it does — skip it unless you are
+compiling it yourself, burning a cartridge, or curious about the
+internals.*
+
+## Building the program
+
+The source keeps every comment. The build strips them, and that is not
+cosmetic: with comments intact the program compiles to about 36KB, which
+leaves under 2.5KB for variables against the roughly 2.8KB the arrays
+need, and it fails with `?OUT OF MEMORY` while building a string.
+Stripped, it is about 10KB and leaves 28KB free.
+
+Compiling needs VS64's BASIC tokeniser, which is plain Python and does
+not need the editor:
+
+```bash
+git clone https://github.com/rolandshacks/vs64
+BC=/path/to/vs64/tools/bc.py ./build.sh
+```
+
+`build.sh` passes **`-c`**, the tokeniser's own comment stripper, which is
+what keeps the build small enough to run:
+
+```bash
+python3 bc.py -c -o meshcore64.prg meshcore64.bas
+```
+
+Drop the `-c` and you get a readable listing on the C64 — useful for
+poking around, but too large to run. Other flags worth knowing: `-m`
+writes a map file, which turns the line number in a `?ERROR IN nnn` back
+into a line of source.
+
+---
+
+## Building a cartridge
 
 The cartridge image is **Magic Desk** (`.crt` type 19) — a banked format,
 and the banking is not optional. The reason is a squeeze:
@@ -170,36 +226,6 @@ into garbage with a blank screen and no other symptom. The cart's ROM stub
 therefore does one thing: copy a small mover routine into the tape buffer
 at `$033C` and jump to it. All the bank switching happens from there, in
 RAM, where the banks moving beneath `$8000` cannot reach it.
-
-### Building
-
-The source keeps every comment. The build strips them, and that is not
-cosmetic: with comments intact the program compiles to about 36KB, which
-leaves under 2.5KB for variables against the roughly 2.8KB the arrays
-need, and it fails with `?OUT OF MEMORY` while building a string.
-Stripped, it is about 10KB and leaves 28KB free.
-
-Compiling needs VS64's BASIC tokeniser, which is plain Python and does
-not need the editor:
-
-```bash
-git clone https://github.com/rolandshacks/vs64
-BC=/path/to/vs64/tools/bc.py ./build.sh
-```
-
-`build.sh` passes **`-c`**, the tokeniser's own comment stripper, which is
-what keeps the build small enough to run:
-
-```bash
-python3 bc.py -c -o meshcore64.prg meshcore64.bas
-```
-
-Drop the `-c` and you get a readable listing on the C64 — useful for
-poking around, but too large to run. Other flags worth knowing: `-m`
-writes a map file, which turns the line number in a `?ERROR IN nnn` back
-into a line of source.
-
----
 
 ## How it works
 
@@ -293,18 +319,3 @@ mean patching code unrelated to serial I/O.
 
 ---
 
-## Known limits
-
-- **The link carries 60 bytes per second, total** — shared with everything
-  the radio reports, not just your messages. A short message is about a
-  second on an idle mesh, longer on a busy one.
-- **The radio is chatty.** It reports *every* LoRa packet it overhears,
-  whether or not it's addressed to you, and on a 600-baud link that's the
-  main reason a busy mesh feels slow. 
-- **Scrollback needs an REU.** With a RAM Expansion Unit, every message is
-  archived per channel and `F5` pages back through it. Without one,
-  switching channels still replays what you missed, but earlier history
-  isn't kept and `F5` is not offered.
-- **Channel slots can have gaps.** The channel list normally stops scanning
-  after a few empty slots, which is fast but misses a channel sitting above
-  a gap. Press `r` in the list to sweep all 40 (about 40 seconds).
