@@ -44,7 +44,7 @@ initialize:
 	rem this is allowed above the open only because the implicit CLR wipes
 	rem zv/zs/zj/zd and nothing here is needed afterwards. do NOT put
 	rem anything above the open that has to survive it.
-	print"{lower}" : print"{clear}{white}MeshCore 64   v1.2c"
+	print"{lower}" : print"{clear}{white}MeshCore 64   v1.2d"
 	print"------------------------------------"
 	poke 56579,126 : zv = 2 : zs = 2
 	for zj = 1 to 24
@@ -130,7 +130,7 @@ initialize:
 	rem message take ~30s to appear. an array store costs nothing and
 	rem creates no garbage. it also skips pointless work: device_info
 	rem is 82 bytes we never even read.
-	hs = 0 : im = 0 : og$ = "" : oa$ = "" : ez = 0 : lt = ti
+	hs = 0 : im = 0 : og$ = "" : oa$ = "" : ez = 0 : lt = ti : rj = 0 : rem rj = frames rejected as implausible
 	ru = 0 : uk = 0 : lr = 0 : sb = 0 : cc = 0 : co = 0 : ck = 0 : ut = 0 : cf = 0 : ht = 0 : pr$ = "> " : rem channel, prev, cached, unread, sweep, history, prompt
 	rem (title already on screen from before the open; CLR wipes variables,
 	rem not the display)
@@ -341,6 +341,29 @@ rxChanMsg:
 	rem 4, so filtering to the current channel costs one peek and no
 	rem extra traffic at all.
 	mc = peek(52740)
+	rem **reject implausible frames before they can reach the archive.**
+	rem an rs-232 overrun desyncs the frame parser - it locks onto a ">"
+	rem sitting inside payload data, reads a plausible length after it and
+	rem hands basic a "frame" assembled from random bytes. when byte 0 of
+	rem that happens to be 17 it arrives here and gets archived, which is
+	rem where the occasional line of garbage in scrollback came from: a
+	rem byte ramp with utf-8 dots either side, clearly not a message.
+	rem two cheap tests kill almost all of them. the firmware has 40 group
+	rem channel slots, so an index above 39 cannot be real; and a channel
+	rem message always carries at least one byte of text after its
+	rem 11-byte header, so a length under 12 cannot be real either.
+	if mc > 39 then rj = rj + 1 : return
+	if fl < 12 then rj = rj + 1 : return
+	rem **txt_type (payload byte 6) is the strongest of the three.** the
+	rem firmware only ever sends 0 plain, 1 cli_data or 2 signed_plain, so
+	rem a desynced frame passes this one byte only about 1 time in 64 --
+	rem against roughly 1 in 6 for the channel index. all three together
+	rem make a garbage frame reaching the archive very unlikely.
+	rem this was worth finding precisely: a captured garbage line matched
+	rem the radio's debug blob read from payload offset 18 while larch had
+	rem asked for offset 11, i.e. the frame had landed in the buffer seven
+	rem bytes early. that is a parser desync, not bad archive arithmetic.
+	if peek(52742) > 2 then rj = rj + 1 : return
 	rem bling on ANY incoming message, whatever channel it belongs to --
 	rem this is "the mesh is talking", not "this is for you".
 	poke 52998,0 : poke 52997,1
@@ -484,7 +507,12 @@ readKeyboard:
 	if a$ = "{f1}" then gosub chanPicker : return
 	if a$ = "{f5}" then gosub scrollBack : return
 	if a$ = "{f7}" then cc = 0 : gosub setChan : return
-	if a$ = "{f3}" then print"{13}hs=";hs;" cc=";cc;" fl=";fl;" im=";im;"{13}nn=";nn$;" cn=";cn$;"{13}";pr$;og$; : return
+	rem rj is the count of frames that arrived looking like channel
+	rem messages but failed the plausibility tests -- i.e. the link is
+	rem corrupting frames. it should be 0 on a healthy 600-baud link, and
+	rem a climbing rj is the signature of a link running too fast: the
+	rem messages are being dropped rather than displayed as garbage.
+	if a$ = "{f3}" then print"{13}hs=";hs;" cc=";cc;" fl=";fl;" im=";im;" rj=";rj;"{13}nn=";nn$;" cn=";cn$;"{13}";pr$;og$; : return
 	za = asc(a$) : if za < 32 or za > 218 then return : rem drop ctrl/colour/fn keys
 	rem keep TWO copies of the typed line: og$ in petscii for the screen,
 	rem oa$ in ascii for the wire. converting one character here costs a
@@ -524,6 +552,27 @@ sendChatMsg:
 	rem opcode, txt_type=plain, channel_idx=cc, timestamp(4), text
 	poke 52998,5 : poke 52997,1 : rem all four leds, in unison
 	gosub sendFrame
+	rem **archive what we just sent.** the radio never echoes our own
+	rem messages back to us, so without this the scrollback shows one
+	rem side of the conversation -- you can read what everyone replied
+	rem to and not what you said.
+	rem staged into cbuf at exactly the offset an incoming frame carries
+	rem its text (11), with clen set to match, so larch files it with no
+	rem special case at all -- including the channel-prefixed copy that
+	rem goes to the "All" region.
+	rem "> " marks the line as ours, matching the prompt it was typed at
+	rem and staying clearly distinct from an incoming "name: text".
+	if ru = 0 then return
+	ms$ = "> " + og$
+	rem scrn renders at most two 40-column lines; cap the stored copy to
+	rem match rather than letting it truncate somewhere arbitrary.
+	if len(ms$) > 78 then ms$ = left$(ms$,78)
+	for zq = 1 to len(ms$)
+	poke 52491 + zq - 1, asc(mid$(ms$,zq,1))
+	next zq
+	poke 52999, 11 + len(ms$) : rem clen
+	mc = cc : rem larch files under mc; for a send that is where we are
+	gosub larch
 	return
 	:
 	:
@@ -642,7 +691,7 @@ setChan:
 	rem only treat this as a real switch if the channel actually
 	rem changed. cancelling out of the picker lands here too, and it
 	rem must not eat messages that arrived while the picker was open.
-	if cc = co then goto setChanSame
+	if cc = co then goto setChanBack
 	rem anything still queued belongs to the channel we just left, so
 	rem printing it under the new channel's name would be a lie.
 	im = 0
@@ -675,6 +724,30 @@ setChan:
 	gosub setPrompt
 	print"{13}";pr$;og$;
 	return
+	:
+	setChanBack:
+	rem **same channel: the picker blanked the screen on its way out.**
+	rem cancelling the picker, or re-picking the channel you are already
+	rem on, lands here. chanPickEnd has already cleared the screen, so
+	rem printing just the prompt left a bare screen that looked like the
+	rem channel had lost its history -- it had not, and switching away
+	rem and back repainted it, which is exactly how this was spotted.
+	rem so put the page back here instead of relying on cc <> co.
+	if ru = 1 then goto setChanBackReu
+	print"{13}-- ";cn$;" --"
+	goto setChanSame
+	setChanBackReu:
+	gosub lreg
+	if lf(zr) = 0 then print"{clear}{white}-- ";cn$;" --" : goto setChanSame
+	rem larch archives on receipt, so anything that arrived while the
+	rem picker was open is already in the page we are about to paint.
+	rem leaving the queue in place would print those same lines a second
+	rem time underneath it.
+	im = 0
+	zy = lw(zr) - 1 : if zy < 0 then zy = lr - 1
+	gosub lpage
+	gosub lhome
+	goto setChanSame
 	:
 	:
 

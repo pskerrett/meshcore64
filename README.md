@@ -2,13 +2,18 @@
 
 A Commodore 64 chat client for the MeshCore mesh network.
 
+> **Also available:** [**v2.01 beta**](https://github.com/pskerrett/meshcore64/tree/v2.0-beta)
+> — the client rewritten entirely in machine language with its own RS-232
+> driver, running at **2400 baud**. Emulator-tested only; this page is the
+> version proven on real hardware.
+
 A real C64 joins a LoRa mesh and sends and receives messages on it, using
 **bit-zeal's mesh modem cartridge** — the Heltec V3 (ESP32-S3) carrier that
 brings a LoRa radio onto the C64 user port. The C64 talks to the radio over
 that port at 600 baud.
 
 ```
-MeshCore 64   v1.2c
+MeshCore 64   v1.2d
 radio fw: mc64 1.17.1
 connected as 59800697 on Public
 f1 channels   f7 public
