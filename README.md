@@ -1,5 +1,17 @@
 # MeshCore 64
 
+> ### 🧪 You are on the `v2.0-beta` branch
+>
+> **v2.01** is the client rewritten entirely in machine language with its
+> own RS-232 driver, reaching **2400 baud** where v1.x tops out at 600.
+> **[Read V2.md →](V2.md)**
+>
+> It is a beta and has only been tested in an emulator. The stable client
+> is the BASIC one on [`main`](https://github.com/pskerrett/meshcore64/tree/main).
+> Hardware setup, firmware flashing and the companion patch below are
+> unchanged and apply to both.
+
+
 A Commodore 64 chat client for the MeshCore mesh network.
 
 A real C64 joins a LoRa mesh and sends and receives messages on it, using
