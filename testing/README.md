@@ -37,7 +37,31 @@ so you can confirm what is on the board without USB.
 | `meshcore64-v2.2d-600-kernal.crt` / `.prg` | v2.2 client, 600 baud, **KERNAL RS-232** — my driver bypassed entirely |
 | `meshcore64-v2.2d-600.crt` / `.prg` | v2.2 client, 600 baud, **my driver** |
 | `*-c64-eprom.bin` | the same programs as flat 32K images for a 27C256 — C64 EPROM images, **not** radio firmware |
+| `firmware-heltec-v3-ble-600-merged.bin` | Bluetooth companion firmware at **600 baud** — flash for rungs 1 and 2 |
+| `firmware-heltec-v3-usb-2400-merged.bin` | **USB** companion firmware at 2400 — the configuration v1.2d was proven on, at the new speed |
 | `src/mlkernal.py` | source of the KERNAL variant |
+
+Flash firmware with:
+
+```bash
+esptool.py --chip esp32s3 write_flash 0x0 firmware-heltec-v3-ble-600-merged.bin
+```
+
+### The USB 2400 build
+
+A fourth rung, for the theory that the Bluetooth companion is itself the
+problem. v1.2d ran against the **USB** companion; the 2400 release uses
+the **BLE** one, which had never been tested. Reading the source I could
+not find a mechanism — the hardware serial is registered and enabled the
+same way in both — but "I could not find it" is not "it is not there".
+
+Pair `firmware-heltec-v3-usb-2400-merged.bin` with the **release**
+`meshcore64-v2.2d.crt`. If that connects and the BLE 2400 pair does not,
+the BLE build is the fault.
+
+Note this firmware also restores the USB companion interface, which the
+BLE env does not define — so you can configure the node over USB again
+rather than only over Bluetooth.
 
 ## About the KERNAL build
 
