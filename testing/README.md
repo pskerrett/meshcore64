@@ -1,5 +1,31 @@
 # testing
 
+## Start here (morning of 24 Sep)
+
+The KERNAL build **connects on real hardware**, which proves the wiring,
+the 600-baud Bluetooth firmware, the client and the protocol are all fine.
+**The fault is in our RS-232 driver**, and there is a specific, documented
+reason it would fail on hardware while passing every emulator test.
+
+Read **[DRIVER-600.md](DRIVER-600.md)** — it has the analysis, what was
+ruled out and why, and how to read the on-screen diagnostics.
+
+Flash `firmware-heltec-v3-ble-600-merged.bin`, then work down this list.
+All three put `n<NN> b<NN>` on **F3**; those two numbers say which third
+of the problem we are in even when a build fails.
+
+| order | cartridge | why |
+|---|---|---|
+| 1 | `meshcore64-v2.2d-600-base.crt` | **control.** Unchanged driver. Two minutes, and if it connects the driver was never broken at 600 and the whole problem is 2400-specific. |
+| 2 | `meshcore64-v2.2d-600-fixA.crt` | **primary candidate.** Removes the interrupt-register read from the transmit timing loop, keeping exact bit timing. |
+| 3 | `meshcore64-v2.2d-600-fixB.crt` | same bug, independent mechanism, in case A has a flaw of its own. |
+
+All three pass in the emulator. That proves only that they break nothing:
+the bug they target is one VICE does not reproduce, so the emulator
+cannot confirm the cure either. Only the hardware can.
+
+---
+
 **Not a release.** Isolation builds for working out why the 2400-baud
 pairing does not connect on real hardware.
 
