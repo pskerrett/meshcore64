@@ -7,7 +7,8 @@
 > interface: node lists, direct messages, telemetry, radio configuration
 > and channel editing. **[Read V2.2.md →](V2.2.md)**
 >
-> It is a beta and has only been tested in an emulator. The stable client
+> It is a beta and has only been tested in an emulator. The release build
+> carries no test instrumentation: it transmits only what you type. The stable client
 > is the BASIC one on [`main`](https://github.com/pskerrett/meshcore64/tree/main).
 >
 > **Flash the 2400-baud firmware** (`meshcore64-ble-2400-*.bin`). v2.2
@@ -164,7 +165,7 @@ each line tagged with the room it came from.
 | A Commodore 64 | any model, real not emulated |
 | bit-zeal's mesh modem cartridge | the Heltec V3 / ESP32-S3 board that carries the LoRa radio onto the user port |
 | The firmware image | `firmware-heltec-v3-2400-merged.bin` — flashed to the Heltec over USB |
-| The program | `meshcore64-v2.crt` (cartridge) or `meshcore64-v2.prg` — loaded on the C64 |
+| The program | `meshcore64-v2.2d.crt` (cartridge) or `meshcore64-v2.2d.prg` — loaded on the C64 |
 
 ---
 
@@ -208,11 +209,11 @@ is already on the radio — it doesn't create channels.
 **4. Seat the board in the cartridge**, plug the cart into the C64, and
 start the program. It connects on its own.
 
-Two ways to run it. Load `meshcore64-v2.prg` the usual way, or put
-`meshcore64-v2.crt` on a cartridge and it runs the moment you switch on —
+Two ways to run it. Load `meshcore64-v2.2d.prg` the usual way, or put
+`meshcore64-v2.2d.crt` on a cartridge and it runs the moment you switch on —
 the mesh modem is on the user port, so the expansion port is free for it.
 
-**Only these two files are the client.** `meshcore64-v2-c64-eprom.bin` is
+**Only these two files are the client.** `meshcore64-v2.2d-c64-eprom.bin` is
 the same program as a flat 32K image for burning a 27C256; it is a C64
 EPROM image, *not* radio firmware, and flashing it to the Heltec will
 leave you with a board that does not answer.
@@ -310,7 +311,7 @@ and being software, they can supply the REU at the same time, so
 scrollback works from cartridge.
 
 Burn **`meshcore64.bin`** — one flat 32768-byte image, banks end to end,
-which is what an EPROM burner wants. `meshcore64-v2.crt` is the same contents
+which is what an EPROM burner wants. `meshcore64-v2.2d.crt` is the same contents
 in the container emulators expect, so use that one for VICE. The padding is
 `$FF`, which is also erased-EPROM state, so it burns cleanly.
 

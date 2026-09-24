@@ -1226,7 +1226,14 @@ cpl:    cpy TXLEN
         jmp cpl
 cpd:    rts
 
-chktik: lda JIFFY
+; The periodic status broadcast is TEST INSTRUMENTATION. It posts the
+; client's counters to the Public channel so the regression harness can
+; read them, and on a real mesh that is thirteen seconds of noise, forever,
+; for everyone in range. It rides on the same flag as the scripted keys:
+; a release build has testk = 0 and says nothing it was not asked to.
+chktik: lda testk
+        beq ctrt
+        lda JIFFY
         cmp LASTJ
         bcs ctnew
         inc TICK
@@ -1238,7 +1245,7 @@ chktik: lda JIFFY
         jsr report
 ctnew:  lda JIFFY
         sta LASTJ
-        rts
+ctrt:   rts
 
 handshk:
         ldx #60
@@ -5189,7 +5196,7 @@ pyastart: .byte 1,0,0,0,0,0,0,0,67,54,52
 pyquery:  .byte 22,3
 pychan:   .byte 31,0
 pytime:   .byte 5
-banner: .text "meshcore 64  v2.2 beta"
+banner: .text "meshcore 64  v2.2d"
         .byte 13,0
 svideo: .text "video  "
         .byte 0
