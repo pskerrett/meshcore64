@@ -1,5 +1,55 @@
 # testing
 
+## READ THIS FIRST — try the LED-free build
+
+fixD failed too, with F3 reading:
+
+    frames/rej/hw 00 00 01 Nff B97 Gd4
+
+**212 edges rejected as glitches.** So false edges are real and numerous —
+the start-bit check is doing substantial work — but 151 bytes still got
+through and formed no valid frame. The check helps and is not sufficient.
+
+### The correlation worth noticing
+
+| build | lamps | hardware |
+|---|---|---|
+| KERNAL | **off** | **connects** |
+| fixAC | on | fails, `Nff Bff` |
+| fixD | on | fails, `Nff B97 Gd4` |
+
+**The only build that connects is the only one with the lamps off**, and
+they were only off there because they were disabled for an unrelated
+reason — the RTS/DTR hazard. That build's success was then attributed to
+its receive algorithm. It was a confounded comparison.
+
+Six LEDs switching current on the cartridge, on pins adjacent to RXD and
+FLAG, while a 600-baud signal arrives, is a noise source no emulator
+models — and 212 spurious edges is consistent with exactly that.
+
+### Try these
+
+| cartridge | what it is |
+|---|---|
+| `meshcore64-v2.2d-600-fixF.crt` | **start here.** fixD **plus every lamp write removed** — no boot sweep, no receive ripple, no transmit flash, no unread counter. Nothing touches `$dd01` after a single write to extinguish them. |
+| `meshcore64-v2.2d-600-fixF-hexdump.crt` | same build, but it prints **every received byte in hex**. Unusable as a client, which is the point — use it if fixF still fails. |
+
+Reading the dump:
+
+| pattern | meaning |
+|---|---|
+| wide random spread | noise, not radio data — transmit is broken too |
+| repeating sequence | consistent mis-sampling: bit rate or sample point |
+| `3e` present, rubbish after | close, mis-framing after the header |
+| runs of `00`/`ff` | line stuck or floating |
+
+If fixF connects, the lamps come back later driven differently — not at
+all during a byte, or on a port that is not the serial one.
+
+---
+
+## Previous round — transmit theory, superseded
+
 ## READ THIS FIRST — the hardware said transmit is fine
 
 fixAC failed on hardware with F3 reading:
