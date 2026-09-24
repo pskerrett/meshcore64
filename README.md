@@ -163,8 +163,8 @@ each line tagged with the room it came from.
 |---|---|
 | A Commodore 64 | any model, real not emulated |
 | bit-zeal's mesh modem cartridge | the Heltec V3 / ESP32-S3 board that carries the LoRa radio onto the user port |
-| The firmware image | `meshcore64-ble-2400-1.17.1-0679dbef-merged.bin` |
-| The program | `meshcore64-v2.prg`, or `meshcore64-v2.crt` (cartridge) |
+| The firmware image | `firmware-heltec-v3-2400-merged.bin` — flashed to the Heltec over USB |
+| The program | `meshcore64-v2.crt` (cartridge) or `meshcore64-v2.prg` — loaded on the C64 |
 
 ---
 
@@ -175,13 +175,19 @@ bit-zeal warns against connecting USB while it is seated in the cart, and
 steps 1–3 all need USB.
 
 **1. Get the firmware.** Either patch a current MeshCore
-`companion_radio_usb` build for the Heltec V3 yourself — see
+`companion_radio_ble` build for the Heltec V3 yourself — see
 [Updating to a newer MeshCore release](#updating-to-a-newer-meshcore-release)
 below — or just use the prebuilt image here:
 
 ```bash
-esptool.py --chip esp32s3 write_flash 0x0 meshcore64-1.17.1-0679dbef-merged.bin
+esptool.py --chip esp32s3 write_flash 0x0 firmware-heltec-v3-2400-merged.bin
 ```
+
+This is the **only** firmware image on this branch, and it is the only one
+that will talk to the v2.2 client. It runs the user-port link at 2400
+baud; the 600-baud image that pairs with v1.2d lives on `main`, and the
+two are not interchangeable — a 600-baud board and a 2400-baud cartridge
+boot happily and never exchange a byte.
 
 Note this replaces Meshtastic on the board. To go back to meshtastic64,
 reflash the Meshtastic firmware; the hardware is unchanged either way.
@@ -189,8 +195,8 @@ reflash the Meshtastic firmware; the hardware is unchanged either way.
 **2. Set up the companion over USB.** Connect to the board with any
 MeshCore client over USB and configure it as you would any companion node —
 region and frequency, node name, and whatever else your local MeshCore
-setup expects. The patched firmware keeps USB working alongside the
-600-baud user-port link, so this is exactly the normal MeshCore setup
+setup expects. The patched firmware keeps USB and Bluetooth working alongside the
+2400-baud user-port link, so this is exactly the normal MeshCore setup
 process.
 
 Get this right before moving on: if the radio isn't on your local
@@ -202,10 +208,14 @@ is already on the radio — it doesn't create channels.
 **4. Seat the board in the cartridge**, plug the cart into the C64, and
 start the program. It connects on its own.
 
-Three ways to run it. Load `meshcore64.prg` the usual way; or put
-`meshcore64.d64` on a disk and `LOAD"MESHCORE64",8`; or put
-`meshcore64.crt` on a cartridge and it runs the moment you switch on — the
-mesh modem is on the user port, so the expansion port is free for it.
+Two ways to run it. Load `meshcore64-v2.prg` the usual way, or put
+`meshcore64-v2.crt` on a cartridge and it runs the moment you switch on —
+the mesh modem is on the user port, so the expansion port is free for it.
+
+**Only these two files are the client.** `meshcore64-v2-c64-eprom.bin` is
+the same program as a flat 32K image for burning a 27C256; it is a C64
+EPROM image, *not* radio firmware, and flashing it to the Heltec will
+leave you with a board that does not answer.
 
 ## Known limits
 
@@ -241,31 +251,25 @@ internals.*
 
 ## Building the program
 
-The source keeps every comment. The build strips them, and that is not
-cosmetic: with comments intact the program compiles to about 36KB, which
-leaves under 2.5KB for variables against the roughly 2.8KB the arrays
-need, and it fails with `?OUT OF MEMORY` while building a string.
-Stripped, it is about 10KB and leaves 28KB free.
-
-Compiling needs VS64's BASIC tokeniser, which is plain Python and does
-not need the editor:
+v2.2 is machine language, assembled by a small Python assembler in `src/`.
+There is no BASIC and no external toolchain:
 
 ```bash
-git clone https://github.com/rolandshacks/vs64
-BC=/path/to/vs64/tools/bc.py ./build.sh
+cd src
+python3 mlfull.py                    # defaults to 2400 baud
+python3 mlfull.py 10 out.prg         # 10 = 2400; 7 = 600, 8 = 1200
 ```
 
-`build.sh` passes **`-c`**, the tokeniser's own comment stripper, which is
-what keeps the build small enough to run:
+`mlfull.py` holds the source as assembly text, `asm.py` assembles it, and
+`mksplash.py` regenerates the packed splash artwork from the artwork
+sources. The build checks four things that had each broken silently once:
+that indirect pointers are in zero page, that no two buffers overlap, that
+the program ends below `$4000` where the splash bitmap unpacks, and that
+the client still fits two cartridge banks.
 
-```bash
-python3 bc.py -c -o meshcore64.prg meshcore64.bas
-```
-
-Drop the `-c` and you get a readable listing on the C64 — useful for
-poking around, but too large to run. Other flags worth knowing: `-m`
-writes a map file, which turns the line number in a `?ERROR IN nnn` back
-into a line of source.
+2400 is the default and the only tested speed. The slower constants remain
+in the table because the bit period is a build-time value either way, and
+they leave a way back if real hardware disagrees with the emulator.
 
 ---
 
@@ -306,7 +310,7 @@ and being software, they can supply the REU at the same time, so
 scrollback works from cartridge.
 
 Burn **`meshcore64.bin`** — one flat 32768-byte image, banks end to end,
-which is what an EPROM burner wants. `meshcore64.crt` is the same contents
+which is what an EPROM burner wants. `meshcore64-v2.crt` is the same contents
 in the container emulators expect, so use that one for VICE. The padding is
 `$FF`, which is also erased-EPROM state, so it burns cleanly.
 
