@@ -1,32 +1,66 @@
 # testing
 
-**Not a release.** These are isolation builds for working out why the
-2400-baud pairing does not connect on real hardware.
+**Not a release.** Isolation builds for working out why the 2400-baud
+pairing does not connect on real hardware.
 
-600 baud is the speed v1.2d was proven on. Pairing the **v2.2d client** with
-a **600-baud firmware** changes one variable at a time:
+v1.2d works on this hardware at 600 baud using the KERNAL's RS-232. v2.2
+does not connect at 2400 using its own driver. Three things changed at
+once — **speed**, **driver**, and **firmware build** — so these separate
+them one at a time.
 
-| result | conclusion |
-|---|---|
-| connects | the v2.2 client and its RS-232 driver are fine on real hardware, and the fault is specific to 2400 |
-| does not connect | the fault is in the client's driver or the firmware pairing, not the speed |
+## The ladder
 
-## What is here
+Work down it. Each rung changes one thing from the rung above.
+
+| # | client | firmware | what a PASS proves |
+|---|---|---|---|
+| 1 | `-600-kernal` | BLE 600 | the whole stack works at 600 with the KERNAL. Isolates **my driver**. |
+| 2 | `-600` | BLE 600 | my driver is fine at 600 — so the fault is specific to **2400**. |
+| 3 | release `v2.2d` | BLE 2400 | this is the combination that currently fails. |
+
+- **1 passes, 2 fails** → my RS-232 driver is the problem, at any speed.
+- **1 and 2 pass, 3 fails** → the fault is speed-specific: bit timing,
+  most likely the NMI-latency constant tuned only in an emulator.
+- **1 fails** → the fault is below all of that — the BLE firmware's
+  hardware-serial path, or the wiring.
+
+**Both halves must be the same speed.** Flashing a 600 firmware against a
+2400 client, or the reverse, boots perfectly and never exchanges a byte.
+That is what went wrong on the first hardware attempt. The firmware now
+reports its own build on the **OLED** (`mc64 ble 600`, `mc64 ble 2400`),
+so you can confirm what is on the board without USB.
+
+## Files
 
 | file | what it is |
 |---|---|
-| `meshcore64-v2.2d-600.crt` | v2.2d client, **600 baud**, cartridge |
-| `meshcore64-v2.2d-600.prg` | the same, as a program |
-| `meshcore64-v2.2d-600-c64-eprom.bin` | the same, flat 32K for a 27C256 — a C64 EPROM image, **not** radio firmware |
+| `meshcore64-v2.2d-600-kernal.crt` / `.prg` | v2.2 client, 600 baud, **KERNAL RS-232** — my driver bypassed entirely |
+| `meshcore64-v2.2d-600.crt` / `.prg` | v2.2 client, 600 baud, **my driver** |
+| `*-c64-eprom.bin` | the same programs as flat 32K images for a 27C256 — C64 EPROM images, **not** radio firmware |
+| `src/mlkernal.py` | source of the KERNAL variant |
 
-A matching 600-baud Bluetooth firmware is being built and will land here
-next. **Both halves must be 600** — that is the whole point of these
-builds, and mixing speeds is what sent the first hardware test wrong.
+## About the KERNAL build
 
-The client is identical to the release except for the bit-period
-constants: same source, built with `python3 mlfull.py 7` instead of `10`.
-It carries no test instrumentation, so it transmits only what you type.
+Same client throughout — menus, node list, telemetry, archive, colour.
+Only the RS-232 layer differs: `SETLFS`/`OPEN` on device 2, receive by
+draining the KERNAL's own ring, transmit by `CHKOUT` and `CHROUT`. Our NMI
+handler is never installed.
 
-From the splash you can tell which you are running: the banner reads
-`meshcore 64 v2.2d` either way, so **check the firmware's OLED**, which
-now reports its own build tag (`mc64 ble 600`, `mc64 ble 2400`, ...).
+Three things that port forced, all found by smoke testing rather than
+reasoning:
+
+- **Zero page had to move.** `$F7-$FA` *are* the KERNAL's RS-232 buffer
+  pointers; the client only had them because it replaced the KERNAL.
+- **`CHKIN` arms the receiver but also redirects `GETIN`.** Leaving the
+  channel open meant the keyboard routine read the *radio*, so incoming
+  traffic was typed into the input line and every byte that happened to be
+  13 sent it back out as a chat message. `CHKIN` once to arm, then
+  `CLRCHN`; the receiver stays armed.
+- **Two second settle after OPEN.** v1.2d documents this: bytes sent or
+  received before the KERNAL's engine is armed come out corrupted.
+- **The cartridge lamps are off** in this build. Every lamp write puts a
+  whole byte into `$DD01`, and under the KERNAL PB1/PB2 are RTS/DTR
+  *outputs* — writing zeros there drives them low and kills reception.
+
+Verified in VICE at 600: full handshake, 37 messages received, nothing
+transmitted that was not typed.
