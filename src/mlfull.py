@@ -167,10 +167,6 @@ EQU = {
     "TKJ":     0xCF9D,
     "TKC":     0xCF9E,
     # ---- non-REU replay ring: 24 messages, 40 bytes each ----
-    "HRTX":    0xC400,
-    "HRCH":    0xC7C0,   # channel each ring entry arrived on
-    "HRH":     0xCFA0,   # write index
-    "HRN":     0xCFA1,   # how many are valid
     "HOLD":    0xCFA2,   # index of the oldest entry
     "ISNTSC":  0xCFA3,
     "RAWHI":   0xCFA4,
@@ -207,8 +203,16 @@ EQU = {
     # ---- contacts ----
     # 32 slots of 64 bytes, so one (PTR),y reaches every field:
     #   0-16 name, 17-48 public key, 49 out_path_len, 50-57 route, 58 type
+    # 96 slots with an REU (where the archive lives in the REU and main
+    # RAM is idle), 32 without (where it competes with the archive).
     "CONTACTS": 0x8000,
-    "NODETAB": 0xC800,   # runtime table of name pointers for the menu
+    "MAXCON":  0xCFF4,
+    "NODETAB": 0x9B00,   # runtime table of name pointers, 96 x 2
+    "NDOFF":   0xCFF5,   # first visible entry, for scrolling
+    "SMC":     0xCFF6,   # index of the colon that ends the sender name
+    "SMH":     0xCFF7,   # name hash, picks the sender colour
+    "SMX":     0xCFF8,
+    "LEDLST":  0xCFF9,   # count the lamps are currently showing
     "NCONT":   0xCFC4,
     "CIDX":    0xCFC5,   # which contact is selected
     "DMON":    0xCFC6,   # 1 = typing goes to a contact, not a channel
@@ -218,7 +222,15 @@ EQU = {
     "PLBUF":   0xC900,   # eight rendered lines, 32 bytes each -- $c900..$c9ff, full
     "PLTAB":   0xC840,   # pointer table -- must NOT sit inside PLBUF
     "PLBASE":  0xCFF0,   # which buffer plnew fills (2 bytes)
-    "PKBUF":   0x8800,   # the picker's own lines: 10 x 32
+    # ---- archive in main RAM, when there is no REU ----
+    # The splash bitmap's 16K, reclaimed the moment the splash is done.
+    # 409 lines of 40 bytes, one merged feed rather than nine regions:
+    # nine would be 28 lines each, barely better than the 24-line ring
+    # this replaces.
+    "ARCRAM":  0x4000,
+    "ARCTL":   0xCFF2,   # scratch for the slot x40 multiply
+    "ARCTH":   0xCFF3,
+    "PKBUF":   0x9800,   # the picker's own lines: 10 x 32
     "PLN":     0xCFCF,   # how many lines are in use
     "PLCOL":   0xCFD0,   # write cursor within the current line
     "NUML":    0xCFD1,   # 16-bit working value for decimal output
@@ -228,6 +240,7 @@ EQU = {
     "REM":     0xCFD3,
     "DECN":    0xCFD4,
     "FWVER":   0xC880,   # firmware version string from DEVICE_INFO
+    "NODENM":  0x9A00,   # node's own name, from SELF_INFO (20 bytes)
     # ---- radio parameters, as reported by SELF_INFO ----
     "RFREQ":   0xCFD5,   # 4 bytes, kHz
     "RBW":     0xCFD9,   # 4 bytes, Hz
@@ -247,7 +260,7 @@ EQU = {
     "INPLEN":  0xCFE6,
     "INPOK":   0xCFE7,
     # ---- channel editing ----
-    "CHNAME":  0x8940,   # 32-byte name, staged away from INPASC
+    "CHNAME":  0x9940,   # 32-byte name, staged away from INPASC
     "SECBUF":  0xC8E0,   # 16-byte channel secret
     "CHIDX":   0xCFE8,
     # ---- telemetry decoding ----
@@ -289,6 +302,8 @@ noblnk: lda #0              ; black ground and border: this is a terminal,
         lda #14
         jsr CHROUT
         jsr splash              ; logo first, then the text banner
+        lda #159                ; cyan, as the wordmark on the splash
+        jsr CHROUT
         lda #<banner
         sta PTR
         lda #>banner
@@ -330,7 +345,16 @@ zcu:    sta CUNR,x
         inx
         cpx #40
         bcc zcu
+; The boot screen prints the node name and firmware version, and both are
+; only ever written by their handlers. A handshake that misses SELF_INFO
+; or DEVICE_INFO -- which happens, see the known fault -- would otherwise
+; print whatever this RAM held at power-on.
+        lda #63             ; '?'
+        sta NODENM
+        sta FWVER
         lda #0
+        sta NODENM+1
+        sta FWVER+1
         sta CC
         lda #255
         sta CO              ; force the first setchan to paint
@@ -339,6 +363,9 @@ zcu:    sta CUNR,x
         jsr reudet
         jsr serini
 
+        jsr bootinf
+        lda #158                ; yellow: still working
+        jsr CHROUT
         lda #<msgcon
         sta PTR
         lda #>msgcon
@@ -357,6 +384,144 @@ loop:   jsr poll
         lda #0
         sta READY
         jmp loop
+
+; ===== what this machine is ===========================================
+; Printed after detpal and reudet, before the link is opened: everything
+; here is known without the radio.
+bootinf:
+        lda #155                ; grey labels, white values
+        jsr CHROUT
+        lda #<svideo
+        sta PTR
+        lda #>svideo
+        sta PTRH
+        jsr prtstr
+        lda #5
+        jsr CHROUT
+        lda ISNTSC
+        beq bipal
+        lda #<sntsc
+        sta PTR
+        lda #>sntsc
+        sta PTRH
+        jmp bivd
+bipal:  lda #<spal
+        sta PTR
+        lda #>spal
+        sta PTRH
+bivd:   jsr prtstr
+        lda #13
+        jsr CHROUT
+; the REU, and how big
+        lda #155
+        jsr CHROUT
+        lda #<sreu
+        sta PTR
+        lda #>sreu
+        sta PTRH
+        jsr prtstr
+        lda #5
+        jsr CHROUT
+        lda RU
+        beq bino
+        lda UKL
+        sta NUML
+        lda UKH
+        sta NUMH
+        jsr prdec
+        lda #<skb
+        sta PTR
+        lda #>skb
+        sta PTRH
+        jmp birt
+bino:   lda #<snone
+        sta PTR
+        lda #>snone
+        sta PTRH
+birt:   jsr prtstr
+        lda #13
+        jsr CHROUT
+        rts
+
+; ===== what the radio is ==============================================
+; Only callable after the handshake: both of these arrive in it.
+radinf: lda #155
+        jsr CHROUT
+        lda #<sradio
+        sta PTR
+        lda #>sradio
+        sta PTRH
+        jsr prtstr
+        lda #5
+        jsr CHROUT
+        lda #<NODENM
+        sta PTR
+        lda #>NODENM
+        sta PTRH
+        jsr prtstr
+        lda #13
+        jsr CHROUT
+        lda #155
+        jsr CHROUT
+        lda #<sfwv
+        sta PTR
+        lda #>sfwv
+        sta PTRH
+        jsr prtstr
+        lda #5
+        jsr CHROUT
+        lda #<FWVER
+        sta PTR
+        lda #>FWVER
+        sta PTRH
+        jsr prtstr
+        lda #13
+        jsr CHROUT
+        rts
+
+; ===== the function keys ==============================================
+keyhelp:
+        lda #13
+        jsr CHROUT
+        lda #154                ; light blue, matching the menu frames
+        jsr CHROUT
+        lda #<skeys
+        sta PTR
+        lda #>skeys
+        sta PTRH
+        jsr prtstr
+        lda #30                 ; back to green for the chat
+        jsr CHROUT
+        rts
+
+; NUMH:NUML as decimal, straight to the screen. pldec builds into the
+; panel buffer, which is not what the boot screen wants.
+prdec:  lda #0
+        sta DECN
+prdl:   lda NUML
+        ora NUMH
+        beq prd2
+        jsr div10
+        clc
+        adc #48
+        ldx DECN
+        sta DECBUF,x
+        inc DECN
+        lda DECN
+        cmp #5
+        bcc prdl
+prd2:   lda DECN
+        bne prd3
+        lda #48
+        jsr CHROUT
+        rts
+prd3:   ldx DECN
+prd4:   dex
+        lda DECBUF,x
+        jsr CHROUT
+        cpx #0
+        bne prd4
+        rts
 
 ; ===== screen plumbing =================================================
 ; The menu is poked straight into screen RAM. Printing it with CHROUT
@@ -1137,11 +1302,15 @@ rsyncw: jsr poll
         lda #9
         jsr waitop
 
+        lda #153                ; light green: we are up
+        jsr CHROUT
         lda #<msgrdy
         sta PTR
         lda #>msgrdy
         sta PTRH
         jsr prtstr
+        jsr radinf
+        jsr keyhelp
         jsr setprm
         jsr shoprm
         jsr sync
@@ -1254,6 +1423,23 @@ dsl2:   lda BUF+56
         sta RSF
         lda BUF+57
         sta RCR
+; the node's own name runs from offset 58 to the end of the frame
+        ldx #0
+dsnl:   cpx #19
+        bcs dsnd
+        txa
+        clc
+        adc #58
+        tay
+        cpy FLEN
+        bcs dsnd
+        lda BUF,y
+        beq dsnd
+        sta NODENM,x
+        inx
+        jmp dsnl
+dsnd:   lda #0
+        sta NODENM,x
         rts
 
 dinfo:  ldx #0
@@ -1281,7 +1467,6 @@ dmsg:   lda BUF+4
         sta TMP             ; the channel this message arrived on
         jsr ledrx
         jsr arcmsg
-        jsr hput
 ; **Filtered for display, never for delivery.** The radio holds one queue
 ; shared by every channel, so a message for a channel we are not watching
 ; still has to be collected -- skipping it would strand it and back the
@@ -1327,19 +1512,84 @@ dbad:   inc RJ
 ; the longer prompt left behind, then redraw the prompt underneath. The
 ; messages flow, the prompt stays at the bottom, and nothing half-typed is
 ; lost -- it moves down with the prompt.
+; A line is "[room] sender: message", or just "sender: message" outside
+; the merged view. Each part gets its own colour, and the sender's is
+; derived from their own name so it is the same from one line to the next.
+;
+; Colour codes go through CHROUT without moving the cursor, so the count
+; used for padding is simply CLEN-11 -- counting printed bytes would
+; include them and pad short.
 shomsg: lda blankb
         bne smrt            ; nothing to look at with the screen off
         jsr bkprm
+        lda #255
+        sta SMC
         ldx #11
-        ldy #0
+smfl:   cpx CLEN
+        bcs smfd
+        lda CBUF,x
+        cmp #58             ; ':'
+        beq smfg
+        inx
+        jmp smfl
+smfg:   stx SMC
+smfd:   ldx #11
+        lda SMC
+        cmp #255
+        beq smbody          ; no sender field: a system line, left plain
+; the room, when the merged view has prefixed one
+        lda CBUF+11
+        cmp #91             ; '['
+        bne smname
+        lda #159            ; cyan
+        jsr CHROUT
+smrl:   cpx CLEN
+        bcs smname
+        lda CBUF,x
+        jsr CHROUT
+        inx
+        cmp #93             ; ']'
+        bne smrl
+        lda #32             ; the space the prefix ends with
+        jsr CHROUT
+        inx
+; the sender: sum the name and index a small palette
+smname: stx SMX
+        lda #0
+        sta SMH
+smhl:   cpx SMC
+        bcs smhd
+        lda SMH
+        clc
+        adc CBUF,x
+        sta SMH
+        inx
+        jmp smhl
+smhd:   lda SMH
+        and #7
+        tay
+        lda smpal,y
+        jsr CHROUT
+        ldx SMX
+smnl:   cpx SMC
+        bcs smbody
+        lda CBUF,x
+        jsr CHROUT
+        inx
+        jmp smnl
+; the message itself
+smbody: lda #30             ; green
+        jsr CHROUT
 sml:    cpx CLEN
         bcs smpad
         lda CBUF,x
         jsr CHROUT
         inx
-        iny
         jmp sml
-smpad:  sty TMP
+smpad:  lda CLEN
+        sec
+        sbc #11
+        sta TMP
         lda PRLEN
         clc
         adc INLEN
@@ -2336,7 +2586,7 @@ cptl:   asl PTR
 ; RESP_CODE_CONTACT: 1-32 key, 33 type, 34 flags, 35 out_path_len,
 ; 36-99 route, 100-131 name. Keep the parts we can act on.
 rxcont: lda NCONT
-        cmp #32
+        cmp MAXCON
         bcs rxcrt               ; table full; the rest are dropped
         lda NCONT
         jsr contptr
@@ -2428,31 +2678,112 @@ ndtl:   lda MNIDX
 ndtd:   lda NCONT
         bne ndshow
         jmp mmshut              ; nothing to show
-ndshow: lda #4
+; The list scrolls. It used to cap MNN at 12 and use MNSEL directly as the
+; contact index, so anything past the twelfth was stored but unreachable --
+; which also made raising the cap pointless.
+ndshow: lda #0
+        sta NDOFF
+        sta MNSEL
+ndpage: lda #4
         sta MNX
         lda #4
         sta MNY
         lda #30
         sta MNW
+; how many of the remainder fit on one screen
         lda NCONT
+        sec
+        sbc NDOFF
         cmp #12
         bcc ndn2
-        lda #12                 ; one screenful is plenty
+        lda #12
 ndn2:   sta MNN
-        lda #<NODETAB
+; MNPTR = NODETAB + NDOFF*2
+        lda NDOFF
+        asl
+        clc
+        adc #<NODETAB
         sta MNPTR
-        lda #>NODETAB
+        lda #0
+        adc #>NODETAB
         sta MNPTRH
         lda #<tnodes
         sta MNTIT
         lda #>tnodes
         sta MNTITH
+        lda #147
+        jsr CHROUT
+        jsr mnbox
+        jsr mnitems
+ndkey:  jsr tkey
+        jsr poll
+        lda READY
+        beq ndk2
+        jsr dispat
         lda #0
-        sta MNSEL
-        jsr menu
-        lda MNSEL
-        cmp #255
+        sta READY
+ndk2:   jsr GETIN
+        cmp #0
+        beq ndkey
+        cmp #17
+        beq nddn
+        cmp #145
+        beq ndup
+        cmp #13
+        beq ndtake
+        cmp #133
         beq ndcan
+        jmp ndkey
+nddn:   lda MNSEL
+        clc
+        adc #1
+        cmp MNN
+        bcc nddn2
+; off the bottom: scroll if there is more below, otherwise wrap to the top
+        lda NDOFF
+        clc
+        adc MNN
+        cmp NCONT
+        bcs ndwrap
+        inc NDOFF
+        jmp ndpage              ; MNSEL stays on the last row
+nddn2:  sta MNSEL
+        jsr mnitems
+        jmp ndkey
+ndwrap: lda #0
+        sta NDOFF
+        sta MNSEL
+        jmp ndpage
+ndup:   lda MNSEL
+        bne ndup2
+        lda NDOFF
+        beq ndlast              ; at the very top: wrap to the end
+        dec NDOFF
+        jmp ndpage              ; MNSEL stays on the first row
+ndup2:  sec
+        sbc #1
+        sta MNSEL
+        jsr mnitems
+        jmp ndkey
+ndlast: lda NCONT
+        cmp #12
+        bcc ndsml
+        sec
+        sbc #12
+        sta NDOFF
+        lda #11
+        sta MNSEL
+        jmp ndpage
+ndsml:  lda #0
+        sta NDOFF
+        lda NCONT
+        sec
+        sbc #1
+        sta MNSEL
+        jmp ndpage
+ndtake: lda NDOFF
+        clc
+        adc MNSEL
         sta CIDX
         jmp nodeact
 ndcan:  jmp mmshut
@@ -2777,42 +3108,51 @@ lppdr:  rts
 
 ; --- the types we understand ---
 lppvlt: lda #<svolt
+        ldx #>svolt
         jsr lpplab
         jsr lpp16u
         lda #2
         sta DECS
         jsr plfix
         lda #<sv
+        ldx #>sv
         jsr lpplab
         jmp lppnx
 lppcur: lda #<scur
+        ldx #>scur
         jsr lpplab
         jsr lpp16u
         lda #2
         sta DECS
         jsr plfix
         lda #<sa
+        ldx #>sa
         jsr lpplab
         jmp lppnx
 lpptmp: lda #<stemp
+        ldx #>stemp
         jsr lpplab
         jsr lpp16s
         lda #1
         sta DECS
         jsr plfix
         lda #<sc
+        ldx #>sc
         jsr lpplab
         jmp lppnx
 lppbar: lda #<sbaro
+        ldx #>sbaro
         jsr lpplab
         jsr lpp16u
         lda #1
         sta DECS
         jsr plfix
         lda #<shpa
+        ldx #>shpa
         jsr lpplab
         jmp lppnx
 lppana: lda #<sana
+        ldx #>sana
         jsr lpplab
         jsr lpp16s
         lda #2
@@ -2820,11 +3160,13 @@ lppana: lda #<sana
         jsr plfix
         jmp lppnx
 lpplux: lda #<slux
+        ldx #>slux
         jsr lpplab
         jsr lpp16u
         jsr pldec
         jmp lppnx
 lpphum: lda #<shum
+        ldx #>shum
         jsr lpplab
         jsr lpp8
         lsr                     ; reported in half percent
@@ -2833,9 +3175,11 @@ lpphum: lda #<shum
         sta NUMH
         jsr pldec
         lda #<spct
+        ldx #>spct
         jsr lpplab
         jmp lppnx
 lppdig: lda #<sdig
+        ldx #>sdig
         jsr lpplab
         jsr lpp8
         sta NUML
@@ -2846,11 +3190,11 @@ lppdig: lda #<sdig
 lppnx:  jsr plend
         jmp lppl
 
-; A label or suffix addressed by its low byte alone; they all live in one
-; page, which build() checks.
+; A label or suffix, low byte in A and high in X. These used to be
+; addressed by low byte alone with the page assumed, which saved two bytes
+; per call and broke every time the code above them grew.
 lpplab: sta SPL
-        lda #>svolt
-        sta SPH
+        stx SPH
         jmp plstr
 
 ; --- pulling values out, big-endian ---
@@ -3523,11 +3867,15 @@ ledtx:  lda #5                  ; all four at once: that one was ours
         sta LEDON
         rts
 
-; stepped once per jiffy from the main loop, so the animation is visible
-; without costing anything measurable
+; Stepped once per jiffy from the main loop, so the animation is visible
+; without costing anything measurable.
+;
+; When nothing is flashing the lamps are not idle -- they show how many
+; messages are waiting, in binary, least significant on PB3. Four lamps
+; count to 15; past that it simply reads 15, which is still "a lot".
 ledstep:
         lda LEDON
-        beq lsrt
+        beq lsidle
         lda JIFFY
         cmp LEDJ
         beq lsrt
@@ -3544,8 +3892,40 @@ ledstep:
         rts
 lsend:  lda #0
         sta LEDON
+        lda #255
+        sta LEDLST              ; force the count back onto the lamps
+; only written when the count changes, so the main loop is untouched the
+; rest of the time
+lsidle: lda UT
+        cmp LEDLST
+        beq lsrt
+        sta LEDLST
+        cmp #16
+        bcc lsi2
+        lda #15                 ; more than the lamps can show
+lsi2:   asl
+        asl
+        asl                     ; bit 0 -> PB3
         sta C2PRB
 lsrt:   rts
+
+; ---- six lamps, when the pins are proven on real hardware ----
+; PB1 and PB2 carry two more, so the count reaches 63:
+;
+;       lda UT
+;       cmp #64
+;       bcc ls6
+;       lda #63
+; ls6:  asl                     ; bit 0 -> PB1
+;       sta C2PRB
+;
+; DDRB must become 126 as well as this changing, and that is the catch:
+; PB1 is RTS and PB2 is DTR, and VICE's userport rs232 drops the link the
+; moment either is driven -- so no emulator test can pass with it on. On
+; the real cart those two pins go to lamps with nothing listening, and
+; bit-zeal's meshtastic64 drives all six, so it should be fine. Should.
+; Untested on hardware, which is why it is commented out rather than
+; switched on.
 
 ledtab: .byte 48,72,48,0,255
         .byte 120,120,0,120,120,0,255
@@ -3617,6 +3997,8 @@ reudet: lda #0
         bne rdno
         lda #1
         sta RU
+        lda #96                 ; the archive is in the REU, so main RAM
+        sta MAXCON              ; is free for a longer contact list
         lda #64
         sta UKL
         lda #0
@@ -3700,8 +4082,18 @@ rdsh:   asl STRL
         dex
         bne rdsh
         rts
+; No REU. The archive moves into main RAM rather than being switched off:
+; one merged region of 409 lines in the reclaimed splash area.
 rdno:   lda #0
         sta RU
+        sta UKL
+        sta UKH
+        lda #32                 ; contacts compete with the archive here
+        sta MAXCON
+        lda #153                ; 409 lines
+        sta MAXL
+        lda #1
+        sta MAXH
         rts
 
 ; 4 bytes, tape buffer <-> reu bank UB offset 0
@@ -3764,9 +4156,66 @@ ralp:   lda ADRL
         bne ralp
 radone: rts
 
+; PTR2 = ARCRAM + SLOT*40, for the RAM archive. Its own scratch, because
+; appage holds TMP and TMP2 live across the transfer.
+ramaddr:
+        lda SLOTL
+        sta PTR2
+        lda SLOTH
+        sta PTR2H
+        lda SLOTL
+        sta ARCTL
+        lda SLOTH
+        sta ARCTH
+        ldx #3
+ram8:   asl PTR2                ; slot*8
+        rol PTR2H
+        dex
+        bne ram8
+        ldx #5
+ram32:  asl ARCTL               ; slot*32
+        rol ARCTH
+        dex
+        bne ram32
+        lda PTR2
+        clc
+        adc ARCTL               ; 8 + 32 = 40
+        sta PTR2
+        lda PTR2H
+        adc ARCTH
+        sta PTR2H
+        lda PTR2H
+        clc
+        adc #>ARCRAM            ; the low byte of ARCRAM is zero
+        sta PTR2H
+        rts
+
+; 40 bytes, PTR -> PTR2
+ramwr:  ldy #0
+ramwl:  lda (PTR),y
+        sta (PTR2),y
+        iny
+        cpy #40
+        bcc ramwl
+        rts
+
+; 40 bytes, PTR2 -> PTR
+ramrd:  ldy #0
+ramrl:  lda (PTR2),y
+        sta (PTR),y
+        iny
+        cpy #40
+        bcc ramrl
+        rts
+
 ; set up a transfer of CNT*40 bytes between c64 PTR and the computed slot
 reuxfer:
-        jsr reuaddr
+        lda RU
+        bne rxreu
+        jsr ramaddr             ; no REU: a plain copy into main RAM
+        jsr ramwr
+        rts
+rxreu:  jsr reuaddr
         lda PTR
         sta RC64L
         lda PTRH
@@ -3839,7 +4288,15 @@ sp8d:   lda #2
 
 ; ===== which region belongs to a channel ===============================
 ; 0-7 get their own, anything higher shares 7, "All" gets 8.
-lreg:   cmp #255
+; Which region a channel archives to. Without an REU there is only one --
+; the merged feed -- and every line in it already carries a [channel]
+; prefix, so it still says where each message came from.
+lreg:   ldx RU
+        bne lrreu
+        lda #8
+        sta REGION
+        rts
+lrreu:  cmp #255
         bne lrn
         lda #8
         sta REGION
@@ -3919,13 +4376,16 @@ lpdone: rts
 ; Twice: plain into its own channel's region, and prefixed into "All" so
 ; that scrolling the merged feed still says where each line came from.
 arcmsg: lda RU
-        beq amrt
+        beq amall               ; no REU: the merged region only
         lda #11
         sta SOFF
         jsr scrn
         lda TMP                 ; the channel it arrived on
         jsr lreg
         jsr lput
+; Without an REU we arrive straight here: one merged region, and the
+; prefix is what makes it readable.
+amall:
 ; The prefix has to END at cbuf byte 10 so it butts against the text at
 ; 11, and it is variable length -- so build it in SBUF first (free now,
 ; lput has already consumed it) and copy it in at 11 minus its length.
@@ -3999,8 +4459,7 @@ amrt:   rts
 ; ===== archive what we just sent =======================================
 ; The radio never echoes our own messages back, so without this the
 ; scrollback shows one side of the conversation.
-arcown: lda RU
-        beq aort
+arcown:
         lda #62                 ; '>'
         sta CBUF+11
         lda #32
@@ -4019,10 +4478,12 @@ aocd:   txa
         lda #11
         sta SOFF
         jsr scrn
-        lda CC
+        lda RU
+        beq aoall               ; no REU: lreg would return region 8 here
+        lda CC                  ; too, and the line would be stored twice
         jsr lreg
         jsr lput
-        lda #8
+aoall:  lda #8
         sta REGION
         jsr lput
 aort:   rts
@@ -4031,8 +4492,6 @@ aort:   rts
 ; 24 lines, NOT 25: the bottom row belongs to the prompt. Painting all 25
 ; put the newest message where the prompt then overwrote it.
 arcpage:
-        lda RU
-        beq aprt
         lda CC
         jsr lreg
         ldx REGION
@@ -4157,7 +4616,12 @@ apfl:   lda CNT
         jmp apfl
 aprt2:  rts
 
-apxfer: lda CNT2
+apxfer: lda RU
+        bne axreu
+        jsr ramaddr
+        jsr ramrd
+        rts
+axreu:  lda CNT2
         pha
         jsr reuaddr
         lda PTR
@@ -4195,8 +4659,6 @@ apnx3:  rts
 
 ; ===== f5 scrollback ===================================================
 scrollb:
-        lda RU
-        beq sbrt
         lda CC
         jsr lreg
         ldx REGION
@@ -4662,34 +5124,11 @@ scall:  lda #0
 ; lands here -- nothing to replay, but the screen still needs painting.
 screp2: lda #0
         sta TMP2
-screp:  lda RU
-        beq scnoreu
-        jsr arcpage
+screp:  jsr arcpage
         jmp scprm
 ; No archive to paint from, so at least say where we are -- the picker
 ; cleared the screen on its way out and a bare prompt looks like the
 ; channel lost its history.
-scnoreu:
-        lda #13
-        jsr CHROUT
-        lda #45
-        jsr CHROUT
-        lda #45
-        jsr CHROUT
-        lda #32
-        jsr CHROUT
-        ldx #0
-scnl:   cpx PRLEN
-        bcs scnd
-        lda PROMPT,x
-        cmp #62             ; stop at the '>' -- name only
-        beq scnd
-        jsr CHROUT
-        inx
-        jmp scnl
-scnd:   lda #13
-        jsr CHROUT
-        jsr hreplay
 scprm:  jsr setprm
         jsr shoprm
         rts
@@ -4700,164 +5139,6 @@ scprm:  jsr setprm
 ; ones: anything you were already watching has been on screen once.
 
 ; PTR -> ring slot Y (40 bytes each: x32 + x8)
-hraddr: tya
-        sta CNT2
-        lda #0
-        sta PTRH
-        lda CNT2
-        sta PTR
-        asl PTR
-        rol PTRH
-        asl PTR
-        rol PTRH
-        asl PTR
-        rol PTRH            ; x8
-        lda PTR
-        sta CNT2
-        lda PTRH
-        sta BLANKS
-        asl PTR
-        rol PTRH
-        asl PTR
-        rol PTRH            ; x32
-        lda PTR
-        clc
-        adc CNT2
-        sta PTR
-        lda PTRH
-        adc BLANKS
-        sta PTRH            ; x40
-        lda PTR
-        clc
-        adc #<HRTX
-        sta PTR
-        lda PTRH
-        adc #>HRTX
-        sta PTRH
-        rts
-
-hput:   lda RU
-        bne hprt            ; the archive already covers this
-        ldy HRH
-        jsr hraddr
-        ldx #11
-        ldy #0
-hpsl:   cpx CLEN
-        bcs hpsd
-        cpy #39
-        bcs hpsd
-        lda CBUF,x
-        sta (PTR),y
-        inx
-        iny
-        jmp hpsl
-hpsd:   lda #0
-        sta (PTR),y         ; terminate, so trailing spaces are not printed
-        ldy HRH
-        lda TMP
-        sta HRCH,y
-        inc HRH
-        lda HRH
-        cmp #24
-        bcc hpn
-        lda #0
-        sta HRH
-hpn:    lda HRN
-        cmp #24
-        bcs hprt
-        inc HRN
-hprt:   rts
-
-; oldest = (HRH + 24 - HRN) mod 24
-holdest:
-        lda HRH
-        clc
-        adc #24
-        sec
-        sbc HRN
-hol1:   cmp #24
-        bcc hol2
-        sec
-        sbc #24
-        jmp hol1
-hol2:   sta HOLD
-        rts
-
-; slot for ring position X
-hslot:  txa
-        clc
-        adc HOLD
-hsl1:   cmp #24
-        bcc hsl2
-        sec
-        sbc #24
-        jmp hsl1
-hsl2:   rts
-
-hreplay:
-        lda RU
-        bne hrrt
-        lda TMP2
-        beq hrrt
-        lda HRN
-        beq hrrt
-        jsr holdest
-; count how many entries belong to this channel. the ring may have rolled
-; over and dropped some of what we counted, so never print more than we
-; actually still hold.
-        lda #0
-        sta CNT
-        ldx #0
-hrc:    cpx HRN
-        bcs hrc2
-        jsr hslot
-        tay
-        lda HRCH,y
-        cmp CC
-        bne hrcn
-        inc CNT
-hrcn:   inx
-        jmp hrc
-hrc2:   lda CNT
-        sec
-        sbc TMP2
-        bcs hrs
-        lda #0
-hrs:    sta TMP             ; how many of the matches to skip
-        ldx #0
-hrp:    cpx HRN
-        bcs hrrt
-        jsr hslot
-        tay
-        lda HRCH,y
-        cmp CC
-        bne hrpn
-        lda TMP
-        beq hrpp
-        dec TMP
-        jmp hrpn
-hrpp:   txa
-        pha
-        jsr hprint
-        pla
-        tax
-hrpn:   inx
-        jmp hrp
-hrrt:   rts
-
-hprint: jsr hraddr
-        ldy #0
-hpl:    cpy #40
-        bcs hpd
-        lda (PTR),y
-        beq hpd
-        jsr CHROUT
-        iny
-        jmp hpl
-hpd:    lda #13
-        jsr CHROUT
-        rts
-
 ; ===== f3 status =======================================================
 status: lda #13
         jsr CHROUT
@@ -4910,6 +5191,14 @@ pychan:   .byte 31,0
 pytime:   .byte 5
 banner: .text "meshcore 64  v2.2 beta"
         .byte 13,0
+svideo: .text "video  "
+        .byte 0
+sradio: .text "radio  "
+        .byte 0
+sfwv:   .text "fw     "
+        .byte 0
+skeys:  .text "f1 menu  f3 stats  f5 history  f7 public"
+        .byte 13,0
 msgcon: .text "connecting..."
         .byte 13,0
 msgrdy: .text "connected."
@@ -4937,6 +5226,9 @@ mi5:    .text "close"
 mtab:   .word mi0,mi1,mi2,mi3,mi4,mi5
 ; one colour per entry: red, yellow, cyan, purple, light green, light blue
 mnclrs: .byte 2,7,3,4,13,14,2,7,3,4,13,14,2,7,3,4
+; sender colours, chosen by name hash. No green -- that is the message --
+; and nothing dark enough to vanish on black.
+smpal:  .byte 5,158,159,156,153,154,150,155
 tchans: .text " channels "
         .byte 0
 sall:   .text "all"
@@ -5077,7 +5369,7 @@ shz:    .text " hz"
         .byte 0
 sdbm:   .text " dbm"
         .byte 0
-sreu:   .text "reu "
+sreu:   .text "reu    "
         .byte 0
 snone:  .text "none"
         .byte 0
@@ -5129,6 +5421,12 @@ TESTKEYS = {
     5: [[133, 17, 13], [13], [17, 13], [80, 65, 83, 83, 13]],
     # f1 -> nodes -> first contact -> send message, then type "hi"
     6: [[133, 17, 13], [13], [13], [72, 73, 13]],
+    # let a few messages arrive (DEL is harmless on an empty line), then f5
+    19: [[20], [20], [20], [20], [135]],
+    # f1 -> nodes, then page down past the twelfth entry
+    20: [[133, 17, 13], [17, 17, 17, 17, 17, 17, 17, 17],
+         [17, 17, 17, 17, 17]],
+    21: [],
     # f1 -> radio config -> node name -> type "c64"
     7: [[133, 17, 17, 17, 13], [145, 145, 145, 13], [67, 54, 52, 13]],
     # ---- documentation screenshots ----
@@ -5206,8 +5504,9 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
     # Buffers that are indexed, not just read, and so will corrupt a
     # neighbour rather than fail loudly if they collide. PKBUF sitting
     # immediately after CONTACTS is exactly the adjacency worth checking.
-    regions = [("CONTACTS", 32 * 64), ("PKBUF", 10 * 32),
-               ("CHNAM", 40 * 18), ("NODETAB", 32 * 2), ("PLTAB", 10 * 2),
+    regions = [("CONTACTS", 96 * 64), ("PKBUF", 10 * 32),
+               ("CHNAM", 40 * 18), ("NODENM", 20), ("NODETAB", 96 * 2),
+               ("PLTAB", 10 * 2),
                ("DECBUF", 12), ("CHNAME", 32), ("FWVER", 20),
                ("INPASC", 32), ("SECBUF", 16),
                ("PLBUF", 8 * 32), ("RBUF", 256), ("TXBUF", 256),
@@ -5220,15 +5519,6 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
                 "%s ($%04X..$%04X) overlaps %s ($%04X..$%04X)"
                 % (an, a0, a1 - 1, bn, b0, b1 - 1))
 
-    # The LPP decoder addresses its labels by low byte alone, with the
-    # high byte taken from svolt, so they have to share one page. Nothing
-    # in the assembler would catch it if an edit pushed one over.
-    lpp = ["svolt", "scur", "stemp", "sbaro", "sana", "slux", "shum",
-           "sdig", "sv", "sa", "sc", "shpa", "spct", "slpptyp"]
-    pages = set(syms[n] >> 8 for n in lpp)
-    if len(pages) != 1:
-        raise ValueError("lpp labels straddle pages: "
-                         + ", ".join("%s=$%04X" % (n, syms[n]) for n in lpp))
     # The splash artwork is what makes this worth checking: it roughly
     # doubled the image, and the bitmap it unpacks into sits at $4000.
     end = ORG + len(code)

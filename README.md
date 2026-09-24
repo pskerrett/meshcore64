@@ -49,7 +49,13 @@ This is an independent, unofficial port and is not affiliated with Jim_64.
 
 ## What it does
 
-Everything hangs off one pop-up menu on `F1`. The link keeps running behind
+It tells you what it found before anything else — the video standard it
+measured, whether there is a RAM Expansion Unit and how big, your node's
+name and firmware version, and what the function keys do.
+
+![The start-up screen](shots/boot.png)
+
+Everything else hangs off one pop-up menu on `F1`. The link keeps running behind
 it — messages still arrive and are archived while you are in a menu, they
 just do not print over the top of it.
 
@@ -59,7 +65,8 @@ just do not print over the top of it.
 
 Type, press RETURN, it goes out over LoRa. Incoming messages appear as they
 arrive, and `Public +3>` means three messages are waiting on other
-channels — switch to one and they are replayed.
+channels — switch to one and they are replayed. Each person gets their own
+colour, so a busy channel is still readable at a glance.
 
 ![Channel picker](shots/channels.png)
 
@@ -126,15 +133,25 @@ ever got. These are what tell you whether the link is healthy.
 
 ![Stats](shots/stats.png)
 
+### History
+
+`F5` pages back through what has been said, `F7` pages forward, anything
+else returns to live. The border turns red while you are looking at
+history.
+
+**This works with or without a RAM Expansion Unit.** With one, every
+channel keeps its own history — up to 512 lines each. Without one, the
+client keeps a single merged feed of the last 409 lines in ordinary RAM,
+each line tagged with the room it came from.
+
+![Scrollback on a machine with no REU](shots/history.png)
+
 ### And the rest
 
-- **Lights up the cartridge.** All six lamps sweep at startup, then a
-  ripple on every incoming message and a flash when you send.
-- **Scrolls back, with a RAM Expansion Unit.** `F5` pages back through
-  screens of history, `F7` pages forward, anything else returns to live.
-  The border turns red while you are looking at history. Without an REU
-  the client behaves exactly as it does otherwise, and `F5` is not
-  offered.
+- **The cartridge lamps tell you something.** All six sweep at startup,
+  then a ripple on every incoming message and a flash when you send — and
+  when nothing is flashing, the four lamps show how many messages are
+  waiting, counted in binary. Four lamps reach 15.
 - **Knows whether it is a PAL or an NTSC machine** and times the serial
   link accordingly, measured at boot rather than assumed.
 
@@ -201,10 +218,11 @@ mesh modem is on the user port, so the expansion port is free for it.
 - **The radio is chatty.** It reports *every* LoRa packet it overhears,
   whether or not it's addressed to you, which is the main reason a busy
   mesh feels slow.
-- **Scrollback needs an REU.** With a RAM Expansion Unit, every message is
-  archived per channel and `F5` pages back through it. Without one,
-  switching channels still replays what you missed, but earlier history
-  isn't kept and `F5` is not offered.
+- **Without an REU, history is one merged feed.** 409 lines, every line
+  tagged with the room it came from. With an REU, each channel keeps its
+  own history of up to 512 lines.
+- **The contact list holds 96 entries with an REU, 32 without** — the
+  radio itself can hold far more.
 - **Channel slots can have gaps.** The channel list normally stops scanning
   after a few empty slots, which is fast but misses a channel sitting above
   a gap. Press `r` in the list to sweep all 40 (about 40 seconds).
