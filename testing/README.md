@@ -14,11 +14,33 @@ Flash `firmware-heltec-v3-ble-600-merged.bin`, then work down this list.
 All three put `n<NN> b<NN>` on **F3**; those two numbers say which third
 of the problem we are in even when a build fails.
 
+There are **two** competing explanations, and the builds separate them.
+
 | order | cartridge | why |
 |---|---|---|
-| 1 | `meshcore64-v2.2d-600-base.crt` | **control.** Unchanged driver. Two minutes, and if it connects the driver was never broken at 600 and the whole problem is 2400-specific. |
-| 2 | `meshcore64-v2.2d-600-fixA.crt` | **primary candidate.** Removes the interrupt-register read from the transmit timing loop, keeping exact bit timing. |
-| 3 | `meshcore64-v2.2d-600-fixB.crt` | same bug, independent mechanism, in case A has a flaw of its own. |
+| 1 | `meshcore64-v2.2d-600-fixAC.crt` | **both fixes. Reach for this if you just want a working link.** |
+| 2 | `meshcore64-v2.2d-600-base.crt` | **control.** Unchanged. Two minutes, and if it connects the driver was never broken at 600 and the problem is 2400-specific. |
+| 3 | `meshcore64-v2.2d-600-fixA.crt` | interrupt-register race **only** |
+| 4 | `meshcore64-v2.2d-600-fixC.crt` | handshake retries **only** |
+
+3 and 4 are what tell us *which* theory was right. If fixAC works, they
+are worth ten minutes so the fix is understood rather than superstition.
+
+| result | conclusion |
+|---|---|
+| fixA works, fixC does not | the interrupt-register race |
+| fixC works, fixA does not | we were talking too early, with no retry |
+| both work | either suffices; ship both |
+| neither, but fixAC works | the two faults compound |
+| none work | read `n`/`b` on F3 — see DRIVER-600.md |
+
+**Then 2400.** `meshcore64-v2.2d-2400-fixAC.crt` and `-2400-fixA.crt` are
+built and waiting, paired with the release
+`firmware-heltec-v3-2400-merged.bin`.
+
+`meshcore64-v2.2d-600-fixB.crt` is a **600-only** fallback if fixA turns
+out to have a flaw of its own — it fails at 2400 by design, see
+DRIVER-600.md.
 
 All three pass in the emulator. That proves only that they break nothing:
 the bug they target is one VICE does not reproduce, so the emulator

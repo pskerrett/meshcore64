@@ -73,7 +73,35 @@ Note the *receive* path genuinely must clear, and does: during a byte the
 data bits' own 1→0 transitions latch FLAG, so re-arming without clearing
 takes an immediate false trigger.
 
-## The two candidate fixes
+## A competing explanation, which may be the real one
+
+**There is no retry anywhere in the handshake.** `waitop` returns when it
+times out and the client carries on with nothing, so a single lost
+`APP_START` strands it permanently.
+
+And the timing differs in a way that is pure accident. Our driver build
+waits 1.2 seconds before speaking. The KERNAL build waits 3.2 — its
+two-second post-`OPEN` settle *on top of* the same 1.2. The C64 boots from
+cartridge in about two seconds; the radio has Bluetooth, a display and a
+LoRa front end to bring up and takes longer.
+
+If the radio simply is not listening yet, the first frame is lost, nothing
+retries, and the client waits forever. That looks *identical* to the
+failure being chased — and it would mean the KERNAL build connects for an
+incidental reason, being slower to start talking, rather than because of
+anything about the driver.
+
+This is tested separately, as **fixC**: unchanged driver, three-second
+wait, four attempts at eight seconds each instead of one at thirty.
+
+| result | conclusion |
+|---|---|
+| fixA works, fixC does not | the interrupt-register race |
+| fixC works, fixA does not | we were talking too early, with no retry |
+| both work | either is sufficient; ship both |
+| neither | both wrong — read `n`/`b` on F3 |
+
+## The candidate fixes
 
 Both remove the register read from the timing loop. They are independent
 mechanisms, so if one has a flaw the other is unlikely to share it.
@@ -86,7 +114,7 @@ there is no per-bit reload and therefore no accumulating error.
 actually moves. Now enforced at build time — a 9600 build is refused
 rather than hanging.
 
-**B — one-shot and poll the control register.** Each bit arms a one-shot
+**B — one-shot and poll the control register. 600 BAUD ONLY.** Each bit arms a one-shot
 and waits for the CIA to clear the START bit itself, which it does on
 timeout. Reading the control register has no side effects either, and
 there is no period limitation. *Cost:* the arming sequence, about 25
@@ -94,7 +122,12 @@ cycles, is added to each bit — 1.5% at 600 baud, drifting the last bit
 boundary 15% of a bit. The receiver samples at bit centres, so that is
 comfortably inside.
 
-A is the primary candidate because it preserves the exact bit timing.
+**Measured:** A works at 600 *and* 2400 in the emulator. B works at 600
+and **fails completely at 2400** — its ~25 cycles of arming per bit is
+1.5% at 600 but 6% at 2400, drifting the last bit boundary 60%, outside
+tolerance. So B is a 600-baud fallback only, and A is the primary
+candidate: it preserves exact bit timing and is the only one with a route
+to 2400.
 
 ## What these builds cannot tell you
 
