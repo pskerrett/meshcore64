@@ -1,5 +1,72 @@
 # testing
 
+## READ THIS FIRST — the hardware said transmit is fine
+
+fixAC failed on hardware with F3 reading:
+
+    frames/rej/hw 00 00 03 Nff Bff
+
+255+ start bits, 255+ bytes, **not one valid frame**. Bytes are arriving
+in quantity, so the radio IS answering us — **transmit works.** The
+overnight theory (the interrupt-register race) was a transmit-side
+theory and is **not what is blocking the link**. It may still be a real
+latent bug; it is not this bug.
+
+Firmware confirmed at 600, and the KERNAL build connects on the same
+setup, so: **the fault is in our receive path and nothing else.**
+
+### The difference between the two receive paths
+
+The KERNAL samples half a bit in and **checks the start bit is still
+low**, discarding the edge if it is not. Ours takes any falling edge and
+immediately commits to nine samples, no check.
+
+One false edge becomes one bad byte — and that byte's own 1→0
+transitions look like more start bits, producing more bad bytes. That
+cascade is exactly `Nff Bff frames 00`.
+
+Why it passes in an emulator: VICE flips the line instantaneously and on
+schedule, so every edge it produces IS a start bit and there is nothing
+to reject. Real wiring has slope, ringing, and 3.3V logic driving a 5V
+input — an edge that crosses the threshold twice on the way down gives
+two triggers from one transition.
+
+### Try these, in order
+
+| cartridge | what it changes |
+|---|---|
+| `meshcore64-v2.2d-600-fixD.crt` | **start with this.** Verifies the start bit, as the KERNAL does. |
+| `meshcore64-v2.2d-600-fixE.crt` | fixD **plus** driving RTS/DTR, which the KERNAL does and we do not. **See the warning below.** |
+
+F3 now has a third counter, `g`, which **tests the theory rather than
+assuming it**:
+
+    frames/rej/hw XX XX XX nXX bXX gXX
+
+| reading | meaning |
+|---|---|
+| `g` large | false edges are real; the check is doing the work |
+| `g00`, frames climbing | fixed, and it was not glitches |
+| `g00`, frames still `00` | **the theory is wrong.** Tell me — next step is sweeping the sample point on hardware, which was dismissed on margin arguments that now look too confident. |
+
+### Warning about fixE
+
+**fixE cannot be verified in the emulator.** VICE models RTS/DTR as live
+handshake lines and throttles the link whenever they are driven — fixD
+scores 41 and 41 on repeated runs, fixE scores 13 and 2. On the real
+cartridge those pins go to LEDs with nothing listening, so the effect
+cannot happen there, but that also means there was no way to test this
+build before shipping it.
+
+Treat it as a last-resort experiment, not a verified fix. It is here
+because "our driver leaves RTS/DTR floating where the kernal drives
+them" is a genuine difference between the working path and the broken
+one, and floating pins sit next to RXD and FLAG on the connector.
+
+---
+
+## Earlier plan (transmit theory — superseded, kept for the record)
+
 ## Start here (morning of 24 Sep)
 
 The KERNAL build **connects on real hardware**, which proves the wiring,
