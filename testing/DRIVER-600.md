@@ -129,6 +129,41 @@ tolerance. So B is a 600-baud fallback only, and A is the primary
 candidate: it preserves exact bit timing and is the only one with a route
 to 2400.
 
+## Emulator coverage
+
+fixAC, one run each, message count in brackets:
+
+| | 600 | 2400 |
+|---|---|---|
+| C64 PAL | pass (43) | pass (43) |
+| C64 NTSC | pass (41) | pass (41) |
+| C128 (64 mode) | **not tested** | **not tested** |
+
+Zero spurious transmissions throughout.
+
+**Repeated, because connecting once is not the question.** The exact
+configuration the hardware uses — NTSC, 600 baud, fixAC — brought the
+link up on **six consecutive runs** (42, 41, 41, 41, 41, 41 messages),
+and NTSC 2400 on three more (41 each). No spurious transmissions in any
+of them. Consistent to within one message, which is scheduling noise in
+when the run is cut off rather than anything about the link.
+
+**The overnight work was all PAL**, because the screenshot harness
+inherited `-pal`. NTSC — the standard the hardware actually runs — was
+added afterwards and passes at both speeds.
+
+**The C128 could not be tested.** `x128` will not initialise on this
+machine: `Couldn't load basic ROM 'basiclo-318018-04.bin'`. Only C64 ROMs
+are installed. Runs attempted against it return zero received simply
+because the emulator never started, and are not evidence of anything. The
+harness supports it (`shotmx.sh x128 ...`, which passes `-go64`) as soon
+as the ROM set is present.
+
+In 64 mode a C128 runs at 1MHz with the same CIA layout, so the link
+logic should behave identically. The real difference is VIC-IIe badline
+timing, which is exactly the sort of thing that moves a marginal sample
+point — worth checking, not worth assuming.
+
 ## What these builds cannot tell you
 
 All three pass in VICE: full handshake, 38 messages received, nothing
