@@ -1,5 +1,55 @@
 # testing
 
+## READ THIS FIRST — tune it on the hardware
+
+fixF (lamps off) did not connect either. Three theories have now been
+tried and none of them was it, so stop guessing and **measure on the
+machine that actually fails**.
+
+### `meshcore64-v2.2d-600-tune.crt`
+
+Prints **every received byte in hex**, and lets the two constants that
+decide whether a byte reads correctly be turned by hand, live:
+
+| key | effect |
+|---|---|
+| `+` / `-` | bit period, ±8 cycles |
+| `.` / `,` | sample point, ±16 cycles |
+| `=` | print the current pair |
+
+Changes take effect on the **very next byte**. Turn a knob, watch the hex.
+
+**What you are looking for is `3e`** — the frame header. If the timing is
+right the rubbish stops and `3e` starts appearing, and we have never once
+seen it.
+
+Start by walking the bit period a few steps either way, then the sample
+point. Note any setting where the bytes become repetitive rather than
+random: that means you are close.
+
+**If NO setting produces sane bytes**, that is the answer too — the bytes
+are not data. Either the line is picking up noise, or the radio is not
+answering and transmit is broken after all. Say so and we stop tuning and
+go after the line itself.
+
+### Why this, and not another fix
+
+Two things turned up in the reference material for bit-banged C64 serial
+([pagetable on UP9600](https://www.pagetable.com/?p=1656)):
+
+- **The timer wants `clock/baud − 1`**, not `clock/baud` — the CIA counts
+  N down to 0, which is N+1 cycles. Ours is one cycle long per bit. At
+  600 baud that is 0.06%, far too small to be this bug, but it is wrong.
+- **Real NMI latency is about 30 cycles.** Our `latadj` is 275, swept in
+  an emulator. At 600 that still samples inside the bit, which is why it
+  was dismissed three times — but it is plainly a constant fitted to VICE
+  rather than to hardware, and the tuner makes it adjustable instead of
+  argued about.
+
+---
+
+## Previous round — the lamps
+
 ## READ THIS FIRST — try the LED-free build
 
 fixD failed too, with F3 reading:
