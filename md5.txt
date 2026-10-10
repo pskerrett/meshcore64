@@ -1,0 +1,5 @@
+72d197513a4862cc5dc0c27029806c1e  meshcore64-v2.4b-2400.prg
+e88624b93d3b96f6be24845aa6b74898  meshcore64-v2.4b-2400.crt
+4e147cdb74d44acfc025da74f2127af0  firmware-heltec-v3-ble-2400-v1.17.1-c64-app.bin
+9b72ab636359d99c8aacf0c9a2fcdc9a  firmware-heltec-v3-ble-2400-v1.17.1-c64-merged.bin
+8e9a087ed908db9be7eafad05bfdf764  meshcore64-v2.4b-2400.bin

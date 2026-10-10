@@ -36,12 +36,17 @@ DIG_X = (W - 2 * 8 * DIG_SC) // 2
 MACH_X0, MACH_X1 = 38, 282
 MACH_TOP = 104                  # back edge of the top surface
 MACH_FRONT = 122                # where the top meets the front face
-MACH_BOT = 192
+MACH_BOT = 186                  # raised from 192 (v2.4b) to free the last text row for the credit
 
 # colours by band: high nibble is the hires foreground
 C_LOGO = 3                      # cyan, close to the MeshCore teal
 C_DIG = 14                      # light blue, the C64's own
 C_MACH = 15                     # light grey
+C_CRED = 14                     # light blue, the credit line
+
+# bottom-right credit, in the last text row
+CREDIT = "2026 -W9PDS"            # preceded by a drawn copyright sign
+CRED_Y = 192
 
 
 def wordmark(page):
@@ -175,6 +180,21 @@ def machine(d):
     d.rectangle([x1 - 16, lip + 5, x1 - 10, lip + 9], fill=0)
 
 
+# The character ROM has no copyright sign, so it is drawn: a ring with a C.
+COPYRIGHT = [0x3C, 0x42, 0x99, 0xA1, 0xA1, 0x99, 0x42, 0x3C]
+
+
+def credit(d):
+    """'(c) 2026 -W9PDS', right-aligned in the bottom text row."""
+    n = 2 + len(CREDIT)                 # the sign, a space, the text
+    x = W - n * 8
+    for row in range(8):
+        for bit in range(8):
+            if COPYRIGHT[row] & (0x80 >> bit):
+                d.point((x + bit, CRED_Y + row), fill=255)
+    glyphs(d, CREDIT, x + 16, CRED_Y)
+
+
 def pack(page):
     """320x200 mono -> c64 hires, cell order."""
     px = page.load()
@@ -212,7 +232,9 @@ def colourmap(logo_h):
     rows = []
     for r in range(25):
         y = r * 8
-        if y < DIG_Y - 2:
+        if y >= CRED_Y:
+            c = C_CRED
+        elif y < DIG_Y - 2:
             c = C_LOGO
         elif y < MACH_TOP - 4:
             c = C_DIG
@@ -228,6 +250,7 @@ if __name__ == "__main__":
     d = ImageDraw.Draw(page)
     digits(d)
     machine(d)
+    credit(d)
 
     bmp = pack(page)
     packed = rle(bmp)

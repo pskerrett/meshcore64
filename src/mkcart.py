@@ -54,15 +54,22 @@ proglen = len(data)
 # has a 32K minimum anyway, so there is nothing to gain from a second cart
 # type, and the stub simply skips the bank-1 copy. The machine-language
 # client is about 5K and lands here; the BASIC one is 13K and does not.
+# Bank 0 carries up to B0 bytes; every later bank a full 8K. From v2.3.1
+# the client has a second code segment and no longer fits in two.
 if proglen <= B0:
     rest = 0
     nb0 = (proglen + 255) // 256
-    nb1 = 0
 else:
     rest = proglen - B0
-    assert rest <= BANKSZ, "needs more than 2 banks (%d bytes over)" % (rest - BANKSZ)
     nb0 = (B0 + 255) // 256
-    nb1 = (rest + 255) // 256
+NBANKS = ROMSZ // BANKSZ
+later = []                       # pages to copy from bank 1, 2, ...
+r = rest
+while r > 0:
+    later.append((min(r, BANKSZ) + 255) // 256)
+    r -= BANKSZ
+assert 1 + len(later) <= NBANKS, "needs %d banks, the ROM has %d" % (1 + len(later), NBANKS)
+nb1 = later[0] if later else 0
 pend = 0x0801 + proglen
 
 MOVER_ADDR = 828        # $033C, the tape buffer: free at boot, and the
@@ -155,9 +162,13 @@ BANK1 = """; select bank 1 and carry on - the destination pointer is already whe
         jsr copy
 """
 
-msrc = (MOVER.replace("@BANK1@", BANK1 if nb1 else "")
+# one copy block per later bank; each continues the stream where the last
+# left off, so only the bank number and page count differ
+banks_src = "".join(BANK1.replace("lda #1\n", "lda #%d\n" % (i + 1), 1)
+                         .replace("#NB1", "#%d" % n)
+                    for i, n in enumerate(later))
+msrc = (MOVER.replace("@BANK1@", banks_src)
              .replace("#NB0", "#%d" % nb0)
-             .replace("#NB1", "#%d" % nb1)
              .replace("#<PEND", "#%d" % (pend & 0xFF))
              .replace("#>PEND", "#%d" % (pend >> 8)))
 mover, _ = assemble(msrc, MOVER_ADDR, {})
@@ -174,12 +185,14 @@ bank0 = header + code
 assert 9 + len(code) <= 256, "stub overflows the first page (%d bytes)" % len(code)
 bank0 += b"\xFF" * (256 - len(bank0)) + data[:B0 if nb1 else proglen]
 bank0 += b"\xFF" * (BANKSZ - len(bank0))
-bank1 = data[B0:]   # from $8000: the mover is in RAM, nothing reserved
-bank1 += b"\xFF" * (BANKSZ - len(bank1))
+# later banks from $8000: the mover is in RAM, nothing reserved
+rom = bank0
+for i in range(len(later)):
+    chunk = data[B0 + i * BANKSZ:B0 + (i + 1) * BANKSZ]
+    rom += chunk + b"\xFF" * (BANKSZ - len(chunk))
 
 # ONE flat image, banks concatenated - that is what an eprom burner wants,
-# and what cartconv expects. Padded to 32K; banks 2 and 3 are unused.
-rom = bank0 + bank1
+# and what cartconv expects. Padded to 32K; unused banks are $ff.
 rom += b"\xFF" * (ROMSZ - len(rom))
 binout = os.path.splitext(OUT)[0] + ".bin"
 open(binout, "wb").write(rom)
@@ -195,6 +208,8 @@ print("mover   : %d bytes, copied to $%04X and run from RAM"
       % (len(mover), MOVER_ADDR))
 print("bank 0  : %d program bytes (%d pages copied)"
       % (B0 if nb1 else proglen, nb0))
-print("bank 1  : %d program bytes (%d pages copied)" % (rest, nb1))
+for i, n in enumerate(later):
+    print("bank %d  : %d program bytes (%d pages copied)"
+          % (i + 1, min(BANKSZ, rest - i * BANKSZ), n))
 print("written : %s (%d bytes, flat - burn this to a 27C256)" % (binout, len(rom)))
 print("written : %s (Magic Desk, via cartconv)" % OUT)

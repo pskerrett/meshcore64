@@ -38,7 +38,8 @@ Build:  python3 mlown.py [ctrl] [out.prg] [blank]
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from asm import assemble
+from asm import assemble, parse
+import sha256_6502
 
 ORG = 0x0801
 OUT = os.path.join(HERE, "mlfull.prg")
@@ -96,9 +97,16 @@ EQU = {
     "ICRSV":   0xCF24,
     "FRERR":   0xCF25,   # framing errors: stop bit was not high
     "TXB":     0xCF26,
+    "NMIEN":   0xCF08,
+    "TXW":     0xCFFD,   # last timer-A high byte seen by txwaitc
+    "TXLST":   0xCFFE,   # nonzero while the LAST byte of a frame is going out   # CIA2 NMI sources currently enabled (mirror of the mask)
+    # --- message timestamps; see tsput ---
+    "NOWTS":   0xCF27,   # 4 bytes: device epoch, advanced locally
+    "LSTTS":   0xCF2B,   # 4 bytes: the last one we actually sent
+    "TSCNT":   0xCF2F,   # jiffies accumulated toward the next second
     # ---- channels / ui ----
-    "CHNAM":   0xC000,   # 40 channel names, 18 bytes each (720)
-    "CUNR":    0xC2D0,   # 40 unread counters
+    "CHNAM":   0xC400,   # 48 names, 18 bytes each: 0-39 channels, 40-47 DMs
+    "CUNR":    0xC2D0,   # 48 unread counters, to $c2ff
     "PKMAP":   0xC300,   # picker slot -> channel index
     "INBUF":   0xC310,   # the line being typed (petscii, for the screen)
     "INASC":   0xC360,   # the same line in ascii, for the wire
@@ -117,7 +125,7 @@ EQU = {
     "CF":      0xCF3E,   # full 40-slot sweep
     "OLDT":    0xCF3F,
     "DECBUF":  0xC860,   # 12 bytes
-    "SBUF":    0xCC00,   # up to two 40-byte screen-code lines
+    "SBUF":    0xCC00,   # up to six 40-byte screen-code lines
     # ---- REU controller ----
     "RCMD":    0xDF01,
     "RC64L":   0xDF02,
@@ -172,6 +180,10 @@ EQU = {
     "RAWHI":   0xCFA4,
     "UNK":     0xCFA5,   # frames with an opcode outside the protocol
     "PBAD":    0xCFA6,   # frames rejected at the length header
+    "TSJIF":   0xCFA7,   # JIFFY as of the last tick
+    "TSOK":    0xCFA8,   # 1 = the radio has told us the time
+    "DMW":     0xCFA9,   # scratch for the DM sender lookup
+    "DMI":     0xCFAA,   # write position while rebuilding the line
     "SPL":     0x00FD,   # splash unpack destination -- MUST be zero page
     "SPH":     0x00FE,
     # The kernal's rs-232 buffers are at $f7-$fa and we do not use them --
@@ -207,7 +219,8 @@ EQU = {
     # RAM is idle), 32 without (where it competes with the archive).
     "CONTACTS": 0x8000,
     "MAXCON":  0xCFF4,
-    "NODETAB": 0x9B00,   # runtime table of name pointers, 96 x 2
+    "NODETAB": 0x9B00,   # name pointers for the VISIBLE nodes, up to 255 x 2
+    "NODEIX":  0x9D00,   # contact slot of each visible node, up to 255
     "NDOFF":   0xCFF5,   # first visible entry, for scrolling
     "SMC":     0xCFF6,   # index of the colon that ends the sender name
     "SMH":     0xCFF7,   # name hash, picks the sender colour
@@ -219,7 +232,9 @@ EQU = {
     "DMKEY":   0xCFC7,   # 6-byte key prefix of that contact
     "CTMP":    0xCFCE,
     # ---- info panel ----
-    "PLBUF":   0xC900,   # eight rendered lines, 32 bytes each -- $c900..$c9ff, full
+    # Ten rendered lines, 32 bytes each. It was eight at $c900 and full;
+    # the radio panel needs ten once the two advert lines are in it.
+    "PLBUF":   0x9E00,
     "PLTAB":   0xC840,   # pointer table -- must NOT sit inside PLBUF
     "PLBASE":  0xCFF0,   # which buffer plnew fills (2 bytes)
     # ---- archive in main RAM, when there is no REU ----
@@ -287,6 +302,32 @@ SRC = r"""
         .byte 11,8,10,0,158,50,48,54,49,0,0,0
 
 main:
+; **Move segment 2 under BASIC ROM before anything else runs.** The
+; program outgrew the space below the splash bitmap at $4000, and this
+; client never calls BASIC -- so the 8K of RAM beneath it at $a000 is free
+; once $01 banks the ROM out. The image loads straight after segment 1,
+; i.e. on top of $4000, so the copy MUST happen before the splash unpacks
+; into that same RAM.
+        lda #54                 ; $36: basic out, kernal and i/o in
+        sta 1
+        lda #<s2img
+        sta PTR
+        lda #>s2img
+        sta PTRH
+        lda #0
+        sta PTR2
+        lda #160
+        sta PTR2H
+        ldx #S2PG
+        ldy #0
+s2cp:   lda (PTR),y
+        sta (PTR2),y
+        iny
+        bne s2cp
+        inc PTRH
+        inc PTR2H
+        dex
+        bne s2cp
         lda blankb
         beq noblnk
         lda VICCTL
@@ -338,12 +379,13 @@ zst:    sta STATE,x
 zch:    sta CHNAM,x
         sta CHNAM+256,x
         sta CHNAM+512,x
+        sta CHNAM+768,x         ; 864 bytes now; $c760-$c7ff is free too
         inx
         bne zch
         ldx #0
 zcu:    sta CUNR,x
         inx
-        cpx #40
+        cpx #48
         bcc zcu
 ; The boot screen prints the node name and firmware version, and both are
 ; only ever written by their handlers. A handshake that misses SELF_INFO
@@ -361,6 +403,7 @@ zcu:    sta CUNR,x
         jsr detpal
         jsr ledboot
         jsr reudet
+        jsr s2init              ; where contacts live depends on the reu
         jsr serini
 
         jsr bootinf
@@ -965,6 +1008,8 @@ serini: sei
         lda #127            ; disable every cia2 interrupt source
         sta C2ICR
         lda C2ICR           ; reading clears whatever was pending
+        lda #16
+        sta NMIEN           ; what the handler will believe is enabled
         lda #144            ; enable FLAG: the start-bit edge
         sta C2ICR
         cli
@@ -982,6 +1027,13 @@ nmih:   pha
         tya
         pha
         lda C2ICR           ; read = acknowledge
+; **Mask by what is ENABLED.** The 6526 latches every source's flag whether
+; or not it is enabled, and FLAG follows RXD, so each falling data edge sets
+; bit 4 while we only want Timer B. The KERNAL does this at $FE73
+; (AND ENABL). Without it a sample tick that follows a 1->0 data bit looks
+; like a start bit and the byte restarts: all-zero garbage on real silicon,
+; perfect in VICE (which pulses FLAG once per byte).
+        and NMIEN
         sta ICRSV
         and #16             ; FLAG?
         beq nmtb
@@ -997,6 +1049,8 @@ nmih:   pha
         sta C2ICR
         lda #130            ; now interrupt on timer B instead
         sta C2ICR
+        lda #2
+        sta NMIEN
         lda #9              ; 8 data bits + the stop bit
         sta BITCNT
         jmp nmx
@@ -1050,6 +1104,8 @@ nmbyte: lda #0
         lda #127
         sta C2ICR
         lda C2ICR
+        lda #16
+        sta NMIEN
         lda #144
         sta C2ICR
 nmx:    pla
@@ -1085,8 +1141,32 @@ txbs:   sta C2PRA
         lda C2PRA
         ora #4              ; stop bit: high
         sta C2PRA
+        lda TXLST
+        bne txlast
         jsr txwait
         rts
+; **The last stop bit of a frame is where the radio's reply can begin.** It
+; decodes our final byte at the middle of that stop bit and can answer
+; within a fraction of a bit. A receiver that is still off, or that reads
+; (and so clears) the ICR, loses the first start bit of the reply -- the
+; whole first frame with it. So arm FLAG now and wait by watching timer A's
+; counter, which has no side effects.
+txlast: lda #127
+        sta C2ICR
+        lda C2ICR           ; nothing real can be here yet: clear the stale
+        lda #16
+        sta NMIEN
+        lda #144
+        sta C2ICR           ; FLAG on: a start edge now takes the NMI itself
+txwaitc: lda C2TAHI
+        sta TXW
+txwcl:  lda C2TAHI
+        cmp TXW
+        beq txwcl           ; unchanged: still counting within this byte
+        bcs txwcd           ; went UP = the timer reloaded = underflow
+        sta TXW             ; went down, as expected; keep watching
+        jmp txwcl
+txwcd:  rts
 
 ; Wait for the next timer A underflow. The timer runs CONTINUOUSLY and is
 ; started once per frame, so the period is exact however long our per-bit
@@ -1100,9 +1180,13 @@ txwait: lda C2ICR
 
 ; mask the receiver, send the framed payload, re-arm the receiver
 sendfr: sei
+        lda #0
+        sta TXLST
         lda #127
         sta C2ICR           ; receiver off for the duration: half duplex,
                             ; which is what this protocol actually is
+        lda #0
+        sta NMIEN
         lda btlo
         sta C2TALO
         lda bthi
@@ -1122,24 +1206,31 @@ sfl:    lda SFY
         cmp TXLEN
         bcs sfd
         tay
+        iny
+        cpy TXLEN
+        bne sfn
+        pha
+        lda #1
+        sta TXLST           ; this is the last byte: its stop bit arms the receiver
+        pla
+sfn:    dey
         lda TXBUF,y
         jsr txbyte
         inc SFY
         jmp sfl
+; the receiver was armed inside the last stop bit, and may already be in
+; the middle of the reply: do NOT clear or re-arm anything here.
 sfd:    lda #0
         sta C2CRA           ; stop the bit clock
-        sta STATE           ; nothing was listening; start clean
+        sta STATE           ; the foreground parser starts clean
+        sta TXLST
         cli
-        lda #127
-        sta C2ICR
-        lda C2ICR
-        lda #144
-        sta C2ICR
         rts
 SFY:    .byte 0
 
 ; ===== drain our ring and reassemble frames ============================
-poll:   lda READY
+poll:   jsr tick
+        lda READY
         bne pdone
         lda RHEAD
         sec
@@ -1203,6 +1294,10 @@ pbad:   inc PBAD
 pdone:  rts
 
 ; ===== everything below is unchanged from mlclient.py ==================
+s1warm: lda #55                 ; basic back in, then its own warm start
+        sta 1
+        jmp ($A002)
+
 wait1:  lda JIFFY
 w1l:    cmp JIFFY
         beq w1l
@@ -1318,6 +1413,7 @@ rsyncw: jsr poll
         jsr prtstr
         jsr radinf
         jsr keyhelp
+        jsr bootscan
         jsr setprm
         jsr shoprm
         jsr sync
@@ -1370,6 +1466,10 @@ dispat: lda BUF
         beq dinfo
         cmp #5                  ; RESP_CODE_SELF_INFO
         beq dself
+        cmp #16                 ; RESP_CODE_CONTACT_MSG_RECV_V3 (a DM)
+        beq ddmj
+        cmp #9                  ; RESP_CODE_CURR_TIME
+        beq dtime
         cmp #133                ; 0x85, push_code_login_success
         beq dlogin
 ; Not one we act on -- but is it one we RECOGNISE? An opcode outside the
@@ -1397,6 +1497,7 @@ dispat: lda BUF
         beq dkn
         inc UNK
 dkn:    rts
+ddmj:   jmp ddm
 dchan:  jmp rxchan
 dcont:  jmp rxcont
 ; fw_version is 20 bytes at offset 60 of the device-info frame
@@ -1412,6 +1513,99 @@ dlogin: lda UIMODE
         sta SPH
         jmp prtsp
 dlgrt:  rts
+
+; ===== message timestamps ==============================================
+; **Every message used to go out stamped ZERO.** That is not cosmetic and
+; it is not a display problem -- it stops messages reaching the mesh at
+; all.
+;
+; The firmware folds the timestamp into the packet, calling it "mostly an
+; extra blob to help make packet_hash unique", and every repeater drops a
+; hash it has already seen (SimpleMeshTables::wasSeen). With a constant
+; zero, the same text from the same sender on the same channel is
+; byte-identical every time, hashes identically, and is swallowed by the
+; first node that already has that hash in its table. Sending "hi" twice
+; meant the second one simply never existed.
+;
+; The radio has a real clock and the handshake already asks for it with
+; CMD_GET_DEVICE_TIME. The reply was recognised and discarded. Now we keep
+; it, and advance it from the C64's own jiffy clock between updates.
+dtime:  ldx #0
+dtl:    lda BUF+1,x
+        sta NOWTS,x
+        inx
+        cpx #4
+        bcc dtl
+        lda #0
+        sta TSCNT
+        lda JIFFY
+        sta TSJIF
+        lda #1
+        sta TSOK
+        rts
+
+; Called from poll, so it runs whenever anything else is running. JIFFY is
+; the low byte of TI and wraps every 256 jiffies (~4.3s); poll is called
+; far more often than that, so a one-byte delta is always enough.
+tick:   lda TSOK
+        beq tckrt
+        lda JIFFY
+        sec
+        sbc TSJIF
+        beq tckrt               ; same jiffy, nothing has moved
+        clc
+        adc TSCNT
+        bcs tckrt               ; absurd gap; drop it rather than skip years
+        sta TSCNT
+        lda JIFFY
+        sta TSJIF
+tck2:   lda TSCNT
+        cmp #60
+        bcc tckrt
+        sec
+        sbc #60
+        sta TSCNT
+        jsr tsinc
+        jmp tck2
+tckrt:  rts
+
+tsinc:  inc NOWTS
+        bne tsirt
+        inc NOWTS+1
+        bne tsirt
+        inc NOWTS+2
+        bne tsirt
+        inc NOWTS+3
+tsirt:  rts
+
+; Stamp an outgoing frame. Both message commands put the timestamp at the
+; same offset: SEND_TXT_MSG is [2][type][attempt][ts:4][key:6][text] and
+; SEND_CHANNEL_TXT_MSG is [3][type][chan][ts:4][text].
+;
+; The value must DIFFER from the last one we sent. Two messages inside the
+; same second would otherwise hash alike and the second would be dropped
+; as a duplicate -- the same trap as the constant zero, just narrower.
+tsput:  lda NOWTS
+        cmp LSTTS
+        bne tsu2
+        lda NOWTS+1
+        cmp LSTTS+1
+        bne tsu2
+        lda NOWTS+2
+        cmp LSTTS+2
+        bne tsu2
+        lda NOWTS+3
+        cmp LSTTS+3
+        bne tsu2
+        jsr tsinc               ; this second is used up; step forward
+tsu2:   ldx #0
+tspl:   lda NOWTS,x
+        sta LSTTS,x
+        sta TXBUF+3,x
+        inx
+        cpx #4
+        bcc tspl
+        rts
 
 dself:  lda BUF+2
         sta RPWR
@@ -1474,17 +1668,24 @@ dmsg:   lda BUF+4
         sta TMP             ; the channel this message arrived on
         jsr ledrx
         jsr arcmsg
+; **Read the channel back from MCH, not TMP.** arcmsg's helpers use TMP as
+; scratch -- lput leaves line*2 in it, chnptr the low byte of index*2 --
+; so a message for the channel you were IN was being compared as channel
+; 0: it printed "+1", counted an unread against Public, and only showed
+; up when you re-selected the channel and it repainted from the archive.
 ; **Filtered for display, never for delivery.** The radio holds one queue
 ; shared by every channel, so a message for a channel we are not watching
 ; still has to be collected -- skipping it would strand it and back the
 ; queue up. It just is not printed.
+; An incoming DM joins here too, with MCH = its conversation (40-47).
+dmroute:
         lda CC
         cmp #255
         beq dmshow          ; "All" shows everything
-        lda TMP
+        lda MCH
         cmp CC
         beq dmshow
-        ldx TMP
+        ldx MCH
         lda CUNR,x
         cmp #255
         beq dmsy
@@ -1513,6 +1714,112 @@ dmnc:   lda UIMODE
 dmnp:   jmp sync
 dbad:   inc RJ
         jmp sync
+
+; ===== an incoming direct message ======================================
+; **Opcode 16 was not handled at all.** It fell through to the "unknown"
+; branch, which does NOT re-issue SYNC_NEXT_MESSAGE -- so one incoming DM
+; wedged the radio's queue and nothing arrived after it, channel messages
+; included. Losing DMs was the smaller half of that bug.
+;
+;   [16][snr][0][0][key:6][path_len][txt_type][timestamp:4][text]
+;
+; Unlike a channel message, the firmware does not prefix the sender's
+; name -- a DM is identified by its key. So look the key up and build
+; "<name>: <text>", which is the shape shomsg already colours by sender.
+ddm:    lda FLEN
+        cmp #17
+        bcc dbad
+        lda BUF+11              ; txt_type -- from the RAW buffer
+        cmp #3
+        bcs dbad
+        jsr ledrx
+        lda #0
+        sta DMI
+        jsr dmwho
+        bcs ddmq                ; never seen this node
+        ldy #0
+ddmn:   cpy #16
+        bcs ddmsep
+        lda (PTR),y
+        beq ddmsep
+        sty DMW
+        ldx DMI
+        sta SBUF,x
+        inc DMI
+        ldy DMW
+        iny
+        jmp ddmn
+ddmq:   ldx DMI
+        lda #63                 ; '?' -- unknown sender, still delivered
+        sta SBUF,x
+        inc DMI
+ddmsep: ldx DMI
+        lda #58                 ; ':'
+        sta SBUF,x
+        inx
+        lda #32
+        sta SBUF,x
+        inx
+        stx DMI
+; the text, from the CONVERTED copy
+        ldy #16
+ddmt:   cpy CLEN
+        bcs ddmd
+        lda CBUF,y
+        sty DMW
+        ldx DMI
+        sta SBUF,x
+        inc DMI
+        ldy DMW
+        iny
+        jmp ddmt
+; put it back at cbuf+11, where scrn and shomsg both expect the text
+ddmd:   ldx #0
+ddmc:   cpx DMI
+        bcs ddmce
+        lda SBUF,x
+        sta CBUF+11,x
+        inx
+        jmp ddmc
+ddmce:  txa
+        clc
+        adc #11
+        sta CLEN
+; Its own conversation, opened if this is the first we have heard from
+; them, then shown or counted unread exactly like a channel message.
+        jsr dmin
+        sta TMP
+        jsr arcmsg
+        jmp dmroute
+
+; Match the 6-byte key prefix against the contact table. CF clear and
+; PTR -> the record when found. The key is binary, so it is compared
+; against the RAW frame; CBUF has been through the character conversion
+; and would not match.
+dmwho:  lda #0
+        sta DMW
+dmwl:   lda DMW
+        cmp NCONT
+        bcs dmwno
+        lda DMW
+        jsr contptr
+        ldx #0
+dmwk:   txa
+        clc
+        adc #17                 ; the key sits at record offset 17
+        tay
+        lda (PTR),y
+        cmp BUF+4,x
+        bne dmwnx
+        inx
+        cpx #6
+        bcc dmwk
+        clc                     ; all six matched
+        rts
+dmwnx:  inc DMW
+        jmp dmwl
+dmwno:  sec
+        rts
 
 ; **Reuse the prompt's own row for the message.** Back up over
 ; prompt+typed text to column 0, write the message there, pad out whatever
@@ -2258,543 +2565,6 @@ statvw: lda #20                 ; CMD_GET_BATT_AND_STORAGE
         sta MNTITH
         jsr plshow
         jmp mmshut
-
-; ===== radio configuration =============================================
-; Each line renders the live value; RETURN on it steps to the next preset.
-; "apply" writes them to the node.
-radiovw:
-        lda #1
-        sta UIMODE
-        lda #0
-        sta MNSEL
-rvdraw: jsr plinit
-; --- frequency, shown in MHz from a kHz value ---
-        jsr plnew
-        lda #<srfreq
-        sta SPL
-        lda #>srfreq
-        sta SPH
-        jsr plstr
-        lda RFREQ
-        sta NUML
-        lda RFREQ+1
-        sta NUMH
-        lda RFREQ+2
-        sta NUM2
-        lda RFREQ+3
-        sta NUM3
-        jsr pldec
-        lda #<skhz
-        sta SPL
-        lda #>skhz
-        sta SPH
-        jsr plstr
-        jsr plend
-; --- bandwidth ---
-        jsr plnew
-        lda #<srbw
-        sta SPL
-        lda #>srbw
-        sta SPH
-        jsr plstr
-        lda RBW
-        sta NUML
-        lda RBW+1
-        sta NUMH
-        lda RBW+2
-        sta NUM2
-        lda RBW+3
-        sta NUM3
-        jsr pldec
-        lda #<shz
-        sta SPL
-        lda #>shz
-        sta SPH
-        jsr plstr
-        jsr plend
-; --- spreading factor ---
-        jsr plnew
-        lda #<srsf
-        sta SPL
-        lda #>srsf
-        sta SPH
-        jsr plstr
-        lda RSF
-        sta NUML
-        lda #0
-        sta NUMH
-        sta NUM2
-        sta NUM3
-        jsr pldec
-        jsr plend
-; --- coding rate ---
-        jsr plnew
-        lda #<srcr
-        sta SPL
-        lda #>srcr
-        sta SPH
-        jsr plstr
-        lda RCR
-        sta NUML
-        lda #0
-        sta NUMH
-        sta NUM2
-        sta NUM3
-        jsr pldec
-        jsr plend
-; --- transmit power ---
-        jsr plnew
-        lda #<srpwr
-        sta SPL
-        lda #>srpwr
-        sta SPH
-        jsr plstr
-        lda RPWR
-        sta NUML
-        lda #0
-        sta NUMH
-        sta NUM2
-        sta NUM3
-        jsr pldec
-        lda #<sdbm
-        sta SPL
-        lda #>sdbm
-        sta SPH
-        jsr plstr
-        jsr plend
-; --- node name ---
-        jsr plnew
-        lda #<srname
-        sta SPL
-        lda #>srname
-        sta SPH
-        jsr plstr
-        jsr plend
-; --- actions ---
-        jsr plnew
-        lda #<srapply
-        sta SPL
-        lda #>srapply
-        sta SPH
-        jsr plstr
-        jsr plend
-        jsr plnew
-        lda #<srback
-        sta SPL
-        lda #>srback
-        sta SPH
-        jsr plstr
-        jsr plend
-
-        lda #147
-        jsr CHROUT
-        lda #4
-        sta MNX
-        lda #6
-        sta MNY
-        lda #28
-        sta MNW
-        lda PLN
-        sta MNN
-        lda #<PLTAB
-        sta MNPTR
-        lda #>PLTAB
-        sta MNPTRH
-        lda #<tradio
-        sta MNTIT
-        lda #>tradio
-        sta MNTITH
-        jsr menu
-        lda MNSEL
-        cmp #255
-        beq rvdone
-        cmp #0
-        beq rvfreq
-        cmp #1
-        beq rvbw
-        cmp #2
-        beq rvsf
-        cmp #3
-        beq rvcr
-        cmp #4
-        beq rvpwr
-        cmp #5
-        beq rvname
-        cmp #6
-        beq rvapply
-rvdone: lda #0
-        sta UIMODE
-        jmp mmshut
-
-; step frequency through the common band presets
-rvfreq: inc RIDX
-        lda RIDX
-        cmp #5
-        bcc rvf2
-        lda #0
-        sta RIDX
-rvf2:   lda RIDX
-        asl
-        asl
-        tay
-        ldx #0
-rvf3:   lda freqtab,y
-        sta RFREQ,x
-        iny
-        inx
-        cpx #4
-        bcc rvf3
-        jmp rvdraw
-; and bandwidth
-rvbw:   inc RBIDX
-        lda RBIDX
-        cmp #4
-        bcc rvb2
-        lda #0
-        sta RBIDX
-rvb2:   lda RBIDX
-        asl
-        asl
-        tay
-        ldx #0
-rvb3:   lda bwtab,y
-        sta RBW,x
-        iny
-        inx
-        cpx #4
-        bcc rvb3
-        jmp rvdraw
-; sf 7..12, cr 5..8, power in 3dBm steps up to the node's maximum
-rvsf:   inc RSF
-        lda RSF
-        cmp #13
-        bcc rvs2
-        lda #7
-        sta RSF
-rvs2:   jmp rvdraw
-rvcr:   inc RCR
-        lda RCR
-        cmp #9
-        bcc rvc2
-        lda #5
-        sta RCR
-rvc2:   jmp rvdraw
-rvpwr:  lda RPWR
-        clc
-        adc #3
-        cmp RMAXP
-        bcc rvp3
-        beq rvp3
-        lda #2
-rvp3:   sta RPWR
-        jmp rvdraw
-
-; ask for a node name and set it
-rvname: lda #<tname
-        sta MNTIT
-        lda #>tname
-        sta MNTITH
-        jsr inpget
-        lda INPOK
-        beq rvn3
-        lda INPLEN
-        beq rvn3
-        lda #8                  ; CMD_SET_ADVERT_NAME
-        sta TXBUF
-        ldx #0
-rvn2:   cpx INPLEN
-        bcs rvn2d
-        lda INPASC,x
-        sta TXBUF+1,x
-        inx
-        jmp rvn2
-rvn2d:  txa
-        clc
-        adc #1
-        sta TXLEN
-        jsr sendfr
-rvn3:   lda #1
-        sta UIMODE
-        jmp rvdraw
-
-; write them to the node: radio params, then tx power
-rvapply:
-        lda #11                 ; CMD_SET_RADIO_PARAMS
-        sta TXBUF
-        ldx #0
-rva2:   lda RFREQ,x
-        sta TXBUF+1,x
-        lda RBW,x
-        sta TXBUF+5,x
-        inx
-        cpx #4
-        bcc rva2
-        lda RSF
-        sta TXBUF+9
-        lda RCR
-        sta TXBUF+10
-        lda #11
-        sta TXLEN
-        jsr sendfr
-        lda #12                 ; CMD_SET_RADIO_TX_POWER
-        sta TXBUF
-        lda RPWR
-        sta TXBUF+1
-        lda #2
-        sta TXLEN
-        jsr sendfr
-        jsr plinit
-        jsr plnew
-        lda #<srsent
-        sta SPL
-        lda #>srsent
-        sta SPH
-        jsr plstr
-        jsr plend
-        lda #<tradio
-        sta MNTIT
-        lda #>tradio
-        sta MNTITH
-        jsr plshow
-        jmp mmshut
-
-; 869.525, 868.000, 915.000, 906.875, 433.500 -- all in kHz
-freqtab: .byte 149,68,13,0
-        .byte 160,62,13,0
-        .byte 56,246,13,0
-        .byte 123,214,13,0
-        .byte 92,157,6,0
-; 250k, 125k, 62.5k, 500k -- in Hz
-bwtab:  .byte 144,208,3,0
-        .byte 72,232,1,0
-        .byte 36,244,0,0
-        .byte 32,161,7,0
-
-; ===== contacts ========================================================; ===== contacts ========================================================
-; PTR -> contact slot for the index in A
-contptr:
-        sta PTR
-        lda #0
-        sta PTRH
-        ldx #6
-cptl:   asl PTR
-        rol PTRH
-        dex
-        bne cptl
-        lda PTR
-        clc
-        adc #<CONTACTS
-        sta PTR
-        lda PTRH
-        adc #>CONTACTS
-        sta PTRH
-        rts
-
-; RESP_CODE_CONTACT: 1-32 key, 33 type, 34 flags, 35 out_path_len,
-; 36-99 route, 100-131 name. Keep the parts we can act on.
-rxcont: lda NCONT
-        cmp MAXCON
-        bcs rxcrt               ; table full; the rest are dropped
-        lda NCONT
-        jsr contptr
-; Take the name from the RAW frame, not the converted copy. conv() makes
-; PETSCII for CHROUT, but the menu draws through a2s, which expects ASCII
-; -- running both turned every name uppercase.
-        ldy #0
-rxcnl:  cpy #16
-        bcs rxcnd
-        lda BUF+100,y
-        beq rxcnd
-        cmp #32                 ; keep anything unprintable out of the list
-        bcc rxcdot
-        cmp #127
-        bcc rxcsv
-rxcdot: lda #46
-rxcsv:  sta (PTR),y
-        iny
-        jmp rxcnl
-rxcnd:  lda #0
-        sta (PTR),y
-; the key comes from the RAW buffer -- it is binary, not text
-        ldx #0
-rxcpl:  cpx #32
-        bcs rxcpd
-        txa
-        clc
-        adc #17
-        tay
-        lda BUF+1,x
-        sta (PTR),y
-        inx
-        jmp rxcpl
-rxcpd:  ldy #49
-        lda BUF+35              ; out_path_len; $ff means "no route, flood"
-        sta (PTR),y
-        ldx #0
-rxcrl:  cpx #8
-        bcs rxcrd
-        txa
-        clc
-        adc #50
-        tay
-        lda BUF+36,x
-        sta (PTR),y
-        inx
-        jmp rxcrl
-rxcrd:  ldy #58
-        lda BUF+33
-        sta (PTR),y
-        inc NCONT
-rxcrt:  rts
-
-; ===== node list =======================================================
-nodelst:
-        lda #1
-        sta UIMODE
-        lda #147                ; a submenu replaces the parent, it does
-        jsr CHROUT              ; not stack on top of it
-        lda #0
-        sta NCONT
-        lda #4                  ; CMD_GET_CONTACTS
-        sta TXBUF
-        lda #1
-        sta TXLEN
-        jsr sendfr
-        lda #0
-        sta STGBIT
-        lda #4                  ; RESP_CODE_END_OF_CONTACTS
-        jsr waitop
-; build the pointer table the menu reads
-        lda #0
-        sta MNIDX
-ndtl:   lda MNIDX
-        cmp NCONT
-        bcs ndtd
-        lda MNIDX
-        jsr contptr
-        lda MNIDX
-        asl
-        tay
-        lda PTR
-        sta NODETAB,y
-        iny
-        lda PTRH
-        sta NODETAB,y
-        inc MNIDX
-        jmp ndtl
-ndtd:   lda NCONT
-        bne ndshow
-        jmp mmshut              ; nothing to show
-; The list scrolls. It used to cap MNN at 12 and use MNSEL directly as the
-; contact index, so anything past the twelfth was stored but unreachable --
-; which also made raising the cap pointless.
-ndshow: lda #0
-        sta NDOFF
-        sta MNSEL
-ndpage: lda #4
-        sta MNX
-        lda #4
-        sta MNY
-        lda #30
-        sta MNW
-; how many of the remainder fit on one screen
-        lda NCONT
-        sec
-        sbc NDOFF
-        cmp #12
-        bcc ndn2
-        lda #12
-ndn2:   sta MNN
-; MNPTR = NODETAB + NDOFF*2
-        lda NDOFF
-        asl
-        clc
-        adc #<NODETAB
-        sta MNPTR
-        lda #0
-        adc #>NODETAB
-        sta MNPTRH
-        lda #<tnodes
-        sta MNTIT
-        lda #>tnodes
-        sta MNTITH
-        lda #147
-        jsr CHROUT
-        jsr mnbox
-        jsr mnitems
-ndkey:  jsr tkey
-        jsr poll
-        lda READY
-        beq ndk2
-        jsr dispat
-        lda #0
-        sta READY
-ndk2:   jsr GETIN
-        cmp #0
-        beq ndkey
-        cmp #17
-        beq nddn
-        cmp #145
-        beq ndup
-        cmp #13
-        beq ndtake
-        cmp #133
-        beq ndcan
-        jmp ndkey
-nddn:   lda MNSEL
-        clc
-        adc #1
-        cmp MNN
-        bcc nddn2
-; off the bottom: scroll if there is more below, otherwise wrap to the top
-        lda NDOFF
-        clc
-        adc MNN
-        cmp NCONT
-        bcs ndwrap
-        inc NDOFF
-        jmp ndpage              ; MNSEL stays on the last row
-nddn2:  sta MNSEL
-        jsr mnitems
-        jmp ndkey
-ndwrap: lda #0
-        sta NDOFF
-        sta MNSEL
-        jmp ndpage
-ndup:   lda MNSEL
-        bne ndup2
-        lda NDOFF
-        beq ndlast              ; at the very top: wrap to the end
-        dec NDOFF
-        jmp ndpage              ; MNSEL stays on the first row
-ndup2:  sec
-        sbc #1
-        sta MNSEL
-        jsr mnitems
-        jmp ndkey
-ndlast: lda NCONT
-        cmp #12
-        bcc ndsml
-        sec
-        sbc #12
-        sta NDOFF
-        lda #11
-        sta MNSEL
-        jmp ndpage
-ndsml:  lda #0
-        sta NDOFF
-        lda NCONT
-        sec
-        sbc #1
-        sta MNSEL
-        jmp ndpage
-ndtake: lda NDOFF
-        clc
-        adc MNSEL
-        sta CIDX
-        jmp nodeact
-ndcan:  jmp mmshut
-
 ; ===== what to do with a node ==========================================
 nodeact:
         lda #14
@@ -2832,22 +2602,7 @@ nalogin: jmp nalogi
 natelem: jmp natele
 ; --- direct message: typing now goes to this contact ---
 ; only the first six bytes of the key are needed to address it
-namsg:  lda CIDX
-        jsr contptr
-        ldx #0
-nam2:   cpx #6
-        bcs nam3
-        txa
-        clc
-        adc #17
-        tay
-        lda (PTR),y
-        sta DMKEY,x
-        inx
-        jmp nam2
-nam3:   lda #1
-        sta DMON
-        jmp mmshut
+namsg:  jmp dmopen              ; a conversation, not a one-off mode
 ; --- show the route ---
 naroute:
         lda CIDX
@@ -3324,7 +3079,10 @@ mmadd:  jmp addchan
 ; so the 16 bytes have to be typed in. That is the same 128-bit key the
 ; phone apps show, and only the 16-byte form is accepted: the firmware
 ; answers the 32-byte variant with ERR_CODE_UNSUPPORTED_CMD.
-; A leading "#" is just part of the name; nothing special is needed here.
+; **A #hashtag channel's key is sha256(name)[0:16], derived HERE.** The
+; firmware does not derive it -- leaving the key blank used to send sixteen
+; zeros, which makes a channel nobody else can read and that drops everyone
+; else's messages. Name starting with '#' + empty key field -> hashch.
 addchan:
         lda #12
         sta MNX
@@ -3352,10 +3110,10 @@ addchan:
         beq carem
         jmp mmshut
 
-caadd:  jsr caslot
+caadd:  jsr cafree
         lda INPOK
         bne caa2
-        jmp mmshut
+        jmp cafull
 caa2:   lda #<tcname
         sta MNTIT
         lda #>tcname
@@ -3380,11 +3138,18 @@ can3:   lda #<tsec
         lda INPOK
         bne caa4
         jmp mmshut
-caa4:   jsr inphx
+caa4:   lda INPLEN
+        bne caa5                ; a typed key is used as typed
+        lda CHNAME
+        cmp #35                 ; '#'
+        bne caa5
+        jsr hashch              ; SECBUF = sha256(CHNAME)[0:16], ~0.6 s
+        jmp chsend
+caa5:   jsr inphx
         jmp chsend
 
 ; removing is the same frame with an empty name and a zero key
-carem:  jsr caslot
+carem:  jsr capick
         lda INPOK
         bne car2
         jmp mmshut
@@ -3397,23 +3162,141 @@ car3:   sta SECBUF,x
         bcc car3
         jmp chsend
 
-; Ask which slot, 0..39. Out of range aborts: clamping to zero would
-; quietly overwrite Public, which is the one slot nobody means to touch.
-caslot: lda #<tslot
-        sta MNTIT
-        lda #>tslot
-        sta MNTITH
-        jsr inpget
-        lda INPOK
-        beq casrt
-        jsr inpnum
-        cmp #40
-        bcs casbad
+; ----- where does a new channel go? -----
+;
+; This used to be a prompt: "slot number 0-39". Nobody can answer that.
+; The picker lists POSITIONS, not slots, so the number being asked for is
+; never shown anywhere in the interface -- and getting it wrong silently
+; overwrites a channel that was already there. Adding a channel means
+; adding it; finding room is our job, not the operator's.
+cafree: lda SCNMAX
+        bne caf1
+; No scan yet, so run one. If it is aborted, SCNMAX stops the hunt at the
+; last slot actually read: an unread slot looks empty, and taking it
+; would silently overwrite a channel we never saw.
+        jsr chscan
+caf1:   lda #0
+        sta SCANI
+caf2:   lda SCANI
+        cmp SCNMAX
+        bcs cafno
+        lda SCANI
+        jsr chnptr
+        ldy #0
+        lda (PTR),y
+        beq caffd               ; empty name = free slot
+        inc SCANI
+        jmp caf2
+caffd:  lda SCANI
         sta CHIDX
-        rts
-casbad: lda #0
+        lda #1
         sta INPOK
-casrt:  rts
+        rts
+cafno:  lda #0
+        sta INPOK
+        rts
+
+; ----- pick an EXISTING channel, by name -----
+;
+; Same reasoning as above, in reverse: to remove a channel you have to be
+; able to say WHICH, and a slot number is not something the UI ever shows.
+; Slot 0 is deliberately left out -- that is Public, and wiping it is
+; never what anyone means.
+capick: lda SCNMAX
+        bne cap1
+        jsr chscan
+cap1:   jsr plinit
+        lda #1                  ; skip Public
+        sta SCANI
+        lda #0
+        sta NPICK
+cap2:   lda SCANI
+        cmp #40
+        bcs cap4
+        lda NPICK
+        cmp #8                  ; PLBUF holds eight rows
+        bcs cap4
+        lda SCANI
+        jsr chnptr
+        ldy #0
+        lda (PTR),y
+        beq cap3                ; empty slot, nothing to remove
+; the name address must be taken BEFORE plnew, which claims PTR
+        lda PTR
+        sta SPL
+        lda PTRH
+        sta SPH
+        ldx NPICK
+        lda SCANI
+        sta PKMAP,x
+        inc NPICK
+        jsr plnew
+        ldy #0
+cap5:   cpy #16
+        bcs cap6
+        sty CTMP
+        lda (SPL),y
+        beq cap6
+        jsr p2a                 ; CHNAM is PETSCII; the menu wants ASCII
+        jsr plchr
+        ldy CTMP
+        iny
+        jmp cap5
+cap6:   jsr plend
+cap3:   inc SCANI
+        jmp cap2
+cap4:   lda NPICK
+        bne cap7
+        lda #0
+        sta INPOK               ; nothing there to remove
+        rts
+cap7:   lda #12
+        sta MNX
+        lda #8
+        sta MNY
+        lda #22
+        sta MNW
+        lda NPICK
+        sta MNN
+        lda #<PLTAB
+        sta MNPTR
+        lda #>PLTAB
+        sta MNPTRH
+        lda #<tcrem
+        sta MNTIT
+        lda #>tcrem
+        sta MNTITH
+        lda #0
+        sta MNSEL
+        jsr menu
+        lda MNSEL
+        cmp #255                ; f1 backed out
+        beq capno
+        ldx MNSEL
+        lda PKMAP,x
+        sta CHIDX
+        lda #1
+        sta INPOK
+        rts
+capno:  lda #0
+        sta INPOK
+        rts
+
+; Every slot taken. Say so rather than silently doing nothing.
+cafull: jsr plinit
+        jsr plnew
+        lda #<tcfull
+        sta SPL
+        lda #>tcfull
+        sta SPH
+        jsr plstr
+        jsr plend
+        lda #<tchan
+        sta MNTIT
+        lda #>tchan
+        sta MNTITH
+        jsr plshow
+        jmp mmshut
 
 canclr: ldx #0
         lda #0
@@ -3450,13 +3333,26 @@ chs3:   lda SECBUF,x
         lda #0
         sta STGBIT              ; not a handshake stage
         jsr waitop              ; RESP_CODE_OK
-; re-scan so the picker shows the change straight away; CF forces the full
-; sweep, because a new channel may well sit above a gap
-        lda #1
-        sta CF
-        jsr chscan
+; **Re-read ONLY the slot we just changed.**
+;
+; This used to force a full 40-slot sweep. At 600 baud that is forty
+; round trips -- the better part of a minute with a frozen screen, no
+; progress shown, and keys ignored because no key loop is running. It
+; looks exactly like a hang, because functionally it is one. And any slot
+; the radio does not answer adds a thirty second timeout on top.
+;
+; One slot is all that changed, so read back one slot.
+        lda #31                 ; CMD_GET_CHANNEL
+        sta TXBUF
+        lda CHIDX
+        sta TXBUF+1
+        lda #2
+        sta TXLEN
+        jsr sendfr
         lda #0
-        sta CF                  ; back to the quick scan, as the picker does
+        sta STGBIT
+        lda #18                 ; RESP_CODE_CHANNEL_INFO
+        jsr waitop
         jsr plinit
         jsr plnew
         lda #<tchset
@@ -3474,32 +3370,6 @@ chs3:   lda SECBUF,x
 
 ; ===== reading numbers back out of the input field =====================
 ; INPASC as decimal -> A. Stops at the first non-digit.
-inpnum: lda #0
-        sta CTMP
-        ldx #0
-innl:   cpx INPLEN
-        bcs innd
-        lda INPASC,x
-        sec
-        sbc #48
-        cmp #10
-        bcs innd
-        sta TMP
-        lda CTMP
-        asl
-        sta CTMP                ; n*2
-        asl
-        asl                     ; n*8
-        clc
-        adc CTMP                ; n*10
-        clc
-        adc TMP
-        sta CTMP
-        inx
-        jmp innl
-innd:   lda CTMP
-        rts
-
 ; INPASC as hex digit pairs -> SECBUF. Short input leaves the rest zero,
 ; which is exactly what an unencrypted channel wants.
 inphx:  ldx #0
@@ -3575,11 +3445,7 @@ sendmsg:
         sta TXBUF+1         ; txt_type plain
         lda CC
         sta TXBUF+2
-        lda #0
-        sta TXBUF+3
-        sta TXBUF+4
-        sta TXBUF+5
-        sta TXBUF+6
+        jsr tsput               ; **not zero** -- see tsput
         ldx #0
 smscp:  cpx INLEN
         bcs smsgo
@@ -3602,10 +3468,7 @@ sendm2: lda #2
         lda #0
         sta TXBUF+1             ; plain
         sta TXBUF+2             ; first attempt
-        sta TXBUF+3
-        sta TXBUF+4
-        sta TXBUF+5
-        sta TXBUF+6
+        jsr tsput               ; **not zero** -- see tsput
         ldx #0
 sdm2:   cpx #6
         bcs sdm3
@@ -3637,7 +3500,15 @@ smsall: lda #<msgpick
         jsr prtstr
         rts
 
-sync:   lda #10
+; **Deferred while a scan or node fetch owns the link.** Every queued
+; message would otherwise interleave with the replies being waited for and
+; print over the status line. The radio holds them in its offline queue,
+; so nothing is lost by asking later -- SYNCP remembers that we owe it.
+sync:   lda SCBUSY
+        beq sync2
+        sta SYNCP
+        rts
+sync2:  lda #10
         sta TXBUF
         lda #1
         sta TXLEN
@@ -3649,10 +3520,7 @@ report: lda #3
         lda #0
         sta TXBUF+1
         sta TXBUF+2
-        sta TXBUF+3
-        sta TXBUF+4
-        sta TXBUF+5
-        sta TXBUF+6
+        jsr tsput               ; before X is set up; tsput uses it
         ldx #7
         lda #110
         sta TXBUF,x
@@ -4267,31 +4135,27 @@ sctl:   lda #32
 sput:   sta SBUF,y
         inx
         iny
-        cpy #80
+        cpy #240                ; six lines: a full-length message fits
         bcc snl
-        lda #2
+        lda #6
         sta SLEN
         rts
-spad:   cpy #41
-        bcs sp80
+; lines = Y/40 rounded up, at least one; blank the rest of the buffer
+spad:   tya
+        ldx #0
+spdv:   inx
+        sec
+        sbc #40
+        beq spdn
+        bcs spdv
+spdn:   stx SLEN
         lda #32
-sp40:   cpy #40
-        bcs sp40d
+spfl:   cpy #240
+        bcs spfd
         sta SBUF,y
         iny
-        jmp sp40
-sp40d:  lda #1
-        sta SLEN
-        rts
-sp80:   lda #32
-sp8l:   cpy #80
-        bcs sp8d
-        sta SBUF,y
-        iny
-        jmp sp8l
-sp8d:   lda #2
-        sta SLEN
-        rts
+        jmp spfl
+spfd:   rts
 
 ; ===== which region belongs to a channel ===============================
 ; 0-7 get their own, anything higher shares 7, "All" gets 8.
@@ -4308,9 +4172,13 @@ lrreu:  cmp #255
         lda #8
         sta REGION
         rts
-lrn:    cmp #8
+lrn:    cmp #40
+        bcs lrdm
+        cmp #6
         bcc lrok
-        lda #7
+        lda #6
+        bne lrok
+lrdm:   lda #7                  ; direct messages
 lrok:   sta REGION
         rts
 
@@ -4330,7 +4198,9 @@ lpl:    cpx CNT
         sta SLOTH
         pla
         pha
-        asl                     ; line index * 40
+        asl                     ; line index * 40 (was *10)
+        asl
+        asl
         sta TMP
         asl
         asl
@@ -4382,12 +4252,17 @@ lpdone: rts
 ; ===== archive one received message ====================================
 ; Twice: plain into its own channel's region, and prefixed into "All" so
 ; that scrolling the merged feed still says where each line came from.
-arcmsg: lda RU
+arcmsg:
+; Callers pass the channel in TMP, but lput and chnptr below both use TMP
+; as scratch. Take a private copy before either runs.
+        lda TMP
+        sta MCH
+        lda RU
         beq amall               ; no REU: the merged region only
         lda #11
         sta SOFF
         jsr scrn
-        lda TMP                 ; the channel it arrived on
+        lda MCH                 ; the channel it arrived on
         jsr lreg
         jsr lput
 ; Without an REU we arrive straight here: one merged region, and the
@@ -4402,7 +4277,7 @@ amall:
         lda #91                 ; '['
         sta SBUF,x
         inx
-        lda TMP
+        lda MCH
         jsr chnptr
         ldy #0
         lda (PTR),y
@@ -4415,7 +4290,7 @@ amall:
         lda #104                ; 'h'
         sta SBUF,x
         inx
-        lda TMP
+        lda MCH
         jsr dec8
         sta TMP2
         lda #3
@@ -4797,47 +4672,6 @@ rfp2:   lda #157
         bne rfp2
 rfrt:   rts
 
-; ===== scan the radio's channel list ===================================
-; The quick scan stops after three blank slots in a row, which is fast but
-; misses a channel sitting above a gap -- a real setup had them at 0, 1 and
-; 5. CF forces the full 40-slot sweep, which is what "R" in the picker does.
-chscan: lda #0
-        sta SCANI
-        sta BLANKS
-cslp:   lda SCANI
-        cmp #40
-        bcs csdone
-        lda #31             ; cmd_get_channel
-        sta TXBUF
-        lda SCANI
-        sta TXBUF+1
-        lda #2
-        sta TXLEN
-        jsr sendfr
-        lda #0
-        sta STGBIT          ; not a handshake stage
-        lda #18
-        jsr waitop
-        lda SCANI
-        jsr chnptr
-        ldy #0
-        lda (PTR),y
-        bne csnb
-        inc BLANKS
-        lda CF
-        bne csnext
-        lda BLANKS
-        cmp #3
-        bcs csdone
-        jmp csnext
-csnb:   lda #0
-        sta BLANKS
-csnext: inc SCANI
-        jmp cslp
-csdone: lda #1
-        sta CKED
-        rts
-
 ; ===== the picker ======================================================
 ; *** MESSAGES KEEP ARRIVING BEHIND THIS SCREEN. *** We must not stop
 ; polling while it is up: at 1200 the ring fills in seconds and an overrun
@@ -4850,16 +4684,9 @@ csdone: lda #1
 ; reason to make people arrow to it instead.
 picker: lda #1
         sta UIMODE
-        lda CKED
-        bne pkshow
-        lda #147
-        jsr CHROUT
-        lda #<msgscan
-        sta PTR
-        lda #>msgscan
-        sta PTRH
-        jsr prtstr
-        jsr chscan
+; **No scan here.** Boot scans once; after that the list is shown from
+; memory and r rescans. Scanning whenever the list was not marked complete
+; meant an aborted or timed-out boot scan made EVERY visit a 40-second wait.
 
 ; Map the list positions onto whatever slots actually have names, so a
 ; sparse radio still gets a dense list. "All" is synthetic and always 0.
@@ -4870,7 +4697,7 @@ pkshow: lda #255
         lda #0
         sta SCANI
 pkbl:   lda SCANI
-        cmp #40
+        cmp #48                 ; 40-47 are DM conversations
         bcs pkbd
         lda NPICK
         cmp #10
@@ -5102,6 +4929,7 @@ p2art:  rts
 
 ; ===== switch channel ==================================================
 setchan:
+        jsr dmsel               ; a DM conversation types to its contact
         lda CC
         cmp CO
         beq screp2           ; same channel: still have to repaint, the
@@ -5136,7 +4964,11 @@ screp:  jsr arcpage
 ; No archive to paint from, so at least say where we are -- the picker
 ; cleared the screen on its way out and a bare prompt looks like the
 ; channel lost its history.
-scprm:  jsr setprm
+scprm:  ldx #23                 ; cursor to row 23: shoprm's RETURN then
+        ldy #0                  ; puts the prompt on the bottom row, under
+        clc                     ; the history, where the chat expects it
+        jsr 65520               ; $fff0 PLOT
+        jsr setprm
         jsr shoprm
         rts
 
@@ -5196,7 +5028,7 @@ pyastart: .byte 1,0,0,0,0,0,0,0,67,54,52
 pyquery:  .byte 22,3
 pychan:   .byte 31,0
 pytime:   .byte 5
-banner: .text "meshcore 64  v2.2d"
+banner: .text "meshcore 64  v2.4b"
         .byte 13,0
 svideo: .text "video  "
         .byte 0
@@ -5211,8 +5043,6 @@ msgcon: .text "connecting..."
 msgrdy: .text "connected."
         .byte 13,13,0
 msgpick: .text "pick a channel to send"
-        .byte 13,0
-msgscan: .text "scanning..."
         .byte 13,0
 msgstat: .text "frames/rej/hw "
         .byte 0
@@ -5251,11 +5081,13 @@ ca2:    .text "back"
 catab:  .word ca0,ca1,ca2
 tchan:  .text " channel "
         .byte 0
-tslot:  .text " slot number 0-39 "
+tcrem:  .text " remove which channel "
+        .byte 0
+tcfull: .text "no free channel slots"
         .byte 0
 tcname: .text " channel name "
         .byte 0
-tsec:   .text " key, 32 hex digits "
+tsec:   .text " key: hex, or blank for none "
         .byte 0
 tchset: .text "channel updated"
         .byte 0
@@ -5340,15 +5172,9 @@ sframe: .text "framing "
         .byte 0
 sring:  .text "ring hw "
         .byte 0
-sfw:    .text "fw "
-        .byte 0
-svid:   .text "video "
-        .byte 0
 spal:   .text "pal"
         .byte 0
 sntsc:  .text "ntsc"
-        .byte 0
-sbaud:  .text "link 2400 baud"
         .byte 0
 srfreq: .text "freq  "
         .byte 0
@@ -5395,6 +5221,1704 @@ rowhi:  .byte 4,4,4,4,4,4,4,5,5,5,5,5,5,6,6,6,6,6,6,6,7,7,7,7,7
 
 """
 
+SRC2 = r"""
+; =======================================================================
+; SEGMENT 2 -- assembled at $a000 and copied there by main, in the RAM
+; under BASIC ROM. Vectors first: RUN/STOP+RESTORE jumps through ($a002),
+; and with BASIC banked out that is read from here.
+; =======================================================================
+        .word s1warm,s1warm
+; ===== segment 2 setup =================================================
+; With an REU the archive lives there and the 16K at $4000 (the splash's
+; bitmap, then the RAM archive) is idle -- room for 255 contacts. Without
+; one, the table keeps its own 6K at $8000: 96 contacts.
+s2init: lda RU
+        beq s2i1
+        lda #64                 ; $4000
+        sta CBASEH
+        lda #255
+        sta MAXCON
+        rts
+s2i1:   lda #128                ; $8000
+        sta CBASEH
+        lda #96
+        sta MAXCON
+        rts
+
+; ===== small printing helpers ==========================================
+; Each counts the columns it prints in SCOL, so s2pad can blank the rest
+; of a line that is being rewritten in place.
+
+; the null-terminated PETSCII string at SPL
+s2str:  ldy #0
+s2s1:   lda (SPL),y
+        beq s2s2
+        jsr CHROUT
+        inc SCOL
+        iny
+        bne s2s1
+s2s2:   rts
+
+; The same for an ASCII string -- contact names are kept in ASCII because
+; the menus draw them through a2s. CHROUT wants PETSCII, where the two
+; letter cases are the other way round.
+s2asc:  ldy #0
+s2a1:   lda (SPL),y
+        beq s2a4
+        cmp #65
+        bcc s2a3
+        cmp #91
+        bcs s2a2
+        ora #32                 ; A-Z -> 97..122, which shows as capitals
+        bne s2a3
+s2a2:   cmp #97
+        bcc s2a3
+        cmp #123
+        bcs s2a3
+        and #223                ; a-z -> 65..90, which shows as lower case
+s2a3:   jsr CHROUT
+        inc SCOL
+        iny
+        cpy #16
+        bcc s2a1
+s2a4:   rts
+
+; A as decimal, no leading zeros
+s2dec:  jsr dec8
+        sta S2T
+        lda #3
+        sec
+        sbc S2T
+        tay
+s2d1:   lda DECBUF,y
+        jsr CHROUT
+        inc SCOL
+        iny
+        cpy #3
+        bcc s2d1
+        rts
+
+; Start rewriting the status line: up one row, back to column 0. The line
+; itself always ends with a RETURN, so the cursor sits just below it and
+; this lands exactly on it -- even after the screen has scrolled.
+s2up:   lda #145
+        jsr CHROUT
+        lda #0
+        sta SCOL
+        rts
+
+; blank out to column 39 and end the line
+s2pad:  lda SCOL
+        cmp #39
+        bcs s2pd
+        lda #32
+        jsr CHROUT
+        inc SCOL
+        jmp s2pad
+s2pd:   lda #13
+        jmp CHROUT
+
+; ===== wait for a reply, with an idle timeout ==========================
+; WANT2 = the opcode wanted (255 = any frame at all); an error frame
+; (opcode 1) also ends the wait. Anything else is dispatched as usual.
+; S2TMO = jiffies of SILENCE allowed; the clock restarts on every frame.
+; Returns carry clear and the opcode in A with READY still set -- the
+; caller handles the frame and clears READY -- or carry set on timeout.
+s2wait: lda JIFFY
+        sta WJ2
+s2w1:   jsr poll
+        lda READY
+        bne s2w3
+; S2KEY set: a keypress ends the wait too -- carry set, key in S2HIT. A
+; timeout also returns carry set, with S2HIT left at 0.
+        lda S2KEY
+        beq s2w2
+        jsr GETIN
+        cmp #0
+        beq s2w2
+        sta S2HIT
+        sec
+        rts
+s2w2:   lda JIFFY
+        sec
+        sbc WJ2
+        cmp S2TMO
+        bcc s2w1
+        rts
+s2w3:   lda WANT2
+        cmp #255
+        beq s2w4
+        lda BUF
+        cmp WANT2
+        beq s2w4
+        cmp #1
+        beq s2w4
+        jsr dispat
+        lda #0
+        sta READY
+        jmp s2wait
+s2w4:   lda BUF
+        clc
+        rts
+
+; ===== scan the radio's channel list ===================================
+; Every slot, every time: the old quick scan stopped after three blank
+; slots and missed a channel sitting above a gap (a real setup had them
+; at 0, 1 and 5).
+;
+; It is slow because the link is. An EMPTY slot still comes back as a full
+; 53-byte frame -- the name field is fixed-width -- and at 600 baud that is
+; most of a second per slot, so forty slots is roughly 35-40 seconds. Hence
+; the running status line, and any key aborts.
+;
+; SCMODE = 1 at boot: bootscan has already printed the header and the
+; screen is not ours to clear. Otherwise this is a refresh from the picker
+; or the channel editor and it takes the screen over.
+chscan: lda #1
+        sta SCBUSY
+        lda #0
+        sta SCANI
+        sta NFOUND
+        sta SCABT
+        sta CSTMO
+        lda #255
+        sta LASTF
+        lda SCMODE
+        bne csh2
+        lda #147
+        jsr CHROUT
+        lda #<s2refr
+        sta SPL
+        lda #>s2refr
+        sta SPH
+        jsr prtsp
+csh2:   lda #13                 ; the row the status line rewrites
+        jsr CHROUT
+cslp:   jsr csline
+        lda SCANI
+        cmp #40
+        bcs csdone
+        jsr GETIN
+        cmp #0
+        beq csgo
+        inc SCABT
+        jmp csdone
+; forget the old name first: a channel deleted from a phone since the last
+; scan comes back with an empty name, and that has to clear it here too
+csgo:   lda SCANI
+        jsr chnptr
+        lda #0
+        tay
+        sta (PTR),y
+        lda #31                 ; CMD_GET_CHANNEL
+        sta TXBUF
+        lda SCANI
+        sta TXBUF+1
+        lda #2
+        sta TXLEN
+        jsr sendfr
+        lda #18                 ; RESP_CODE_CHANNEL_INFO
+        sta WANT2
+        lda #200                ; ~3.3s of silence
+        sta S2TMO
+        jsr s2wait
+        bcs cstmo
+        cmp #18
+        bne cserr
+        jsr dispat              ; rxchan files the name
+        lda #0
+        sta READY
+        sta CSTMO
+        lda SCANI
+        jsr chnptr
+        ldy #0
+        lda (PTR),y
+        beq csnx
+        inc NFOUND
+        lda SCANI
+        sta LASTF
+csnx:   inc SCANI
+        jmp cslp
+; An error means the slot does not exist: the radio has fewer than forty
+; and we are past the last one. That is a complete scan, not a failure.
+cserr:  lda #0
+        sta READY
+        jmp csdone
+; One silent slot is skipped. Two in a row means the radio is not
+; answering at all, and forty more 3-second waits would look like a hang.
+cstmo:  inc SCANI
+        inc CSTMO
+        lda CSTMO
+        cmp #2
+        bcc cslp
+        inc SCABT
+csdone: lda SCANI
+        sta SCNMAX              ; how far add-channel may trust the list
+        lda SCABT
+        bne csd2
+        lda #1
+        sta CKED
+csd2:   jsr csfin
+        lda #0
+        sta SCBUSY
+        lda SCMODE
+        bne csd3                ; boot: the handshake syncs straight after
+        lda SYNCP
+        beq csd3
+        jsr sync
+csd3:   lda #0
+        sta SYNCP
+        sta SCMODE
+        rts
+
+; "slot 12/40  found 3: #test"
+csline: jsr s2up
+        lda #<s2slot
+        sta SPL
+        lda #>s2slot
+        sta SPH
+        jsr s2str
+        lda SCANI
+        jsr s2dec
+        lda #<s2of40
+        sta SPL
+        lda #>s2of40
+        sta SPH
+        jsr s2str
+        lda NFOUND
+        jsr s2dec
+        lda LASTF
+        cmp #255
+        beq csl2
+        lda #<s2colon
+        sta SPL
+        lda #>s2colon
+        sta SPH
+        jsr s2str
+        lda LASTF
+        jsr chnptr
+        lda PTR
+        sta SPL
+        lda PTRH
+        sta SPH
+        jsr s2str               ; channel names are kept in petscii
+csl2:   jmp s2pad
+
+; "channels found: 3" -- and say so if it was cut short
+csfin:  jsr s2up
+        lda #<s2cfnd
+        sta SPL
+        lda #>s2cfnd
+        sta SPH
+        jsr s2str
+        lda NFOUND
+        jsr s2dec
+        lda SCABT
+        beq csf2
+        lda #<s2abt
+        sta SPL
+        lda #>s2abt
+        sta SPH
+        jsr s2str
+csf2:   jmp s2pad
+
+; ===== scan at boot, unless a key says not to ==========================
+; Two seconds to opt out, then the full scan. Message sync is held off
+; until it is done (see sync), so nothing prints over the status line.
+bootscan:
+        lda #1
+        sta UIMODE
+        sta SCBUSY
+        sta SCMODE
+        lda #0
+        sta 198                 ; ndx: drop keys pressed during the splash
+        lda #<s2boot
+        sta SPL
+        lda #>s2boot
+        sta SPH
+        jsr prtsp
+        lda #120
+        sta S2T
+        lda JIFFY
+        sta WJ2
+bsw:    jsr poll
+        lda READY
+        beq bsw2
+        jsr dispat
+        lda #0
+        sta READY
+bsw2:   jsr GETIN
+        cmp #0
+        bne bsab
+        lda JIFFY
+        cmp WJ2
+        beq bsw
+        sta WJ2
+        dec S2T
+        bne bsw
+        jsr chscan
+        jmp bsdn
+bsab:   lda #<s2skip
+        sta SPL
+        lda #>s2skip
+        sta SPH
+        jsr prtsp
+bsdn:   lda #0
+        sta UIMODE
+        sta SCBUSY
+        sta SCMODE
+        sta SYNCP               ; handshk syncs next regardless
+        rts
+
+; ===== node list =======================================================
+; Which kind first. The radio has no type filter -- CMD_GET_CONTACTS only
+; takes 'since' -- so every contact still crosses the link, ~148 bytes and
+; about 2.5 seconds each at 600 baud. What the choice buys is the TABLE:
+; only this type is kept, so hundreds of nodes do not have to fit in RAM
+; and the list is not a scroll through every repeater to find a person.
+;
+; Each type is cached once fetched (TLOAD), and reopening it is instant.
+; R in the list fetches it again.
+nodelst:
+        lda #1
+        sta UIMODE
+        lda #147                ; a submenu replaces the parent
+        jsr CHROUT
+        lda #10
+        sta MNX
+        lda #7
+        sta MNY
+        lda #20
+        sta MNW
+        lda #4
+        sta MNN
+        lda #<nttab
+        sta MNPTR
+        lda #>nttab
+        sta MNPTRH
+        lda #<tnodes
+        sta MNTIT
+        lda #>tnodes
+        sta MNTITH
+        lda #0
+        sta MNSEL
+        jsr menu
+        lda MNSEL
+        cmp #255
+        bne ntsel
+        jmp mmshut
+; menu() clears UIMODE on its way out. Put it back, or every message that
+; arrives while the list is up prints straight over it.
+ntsel:  ldx #1
+        stx UIMODE
+        clc
+        adc #1                  ; ADV_TYPE_CHAT=1 REPEATER=2 ROOM=3 SENSOR=4
+        sta NTYPE
+        tax
+        lda TLOAD,x
+        beq ndfetch
+        lda #0
+        sta NTRUNC
+        jmp ndview
+
+; ----- fetch one type from the radio -----
+ndfetch:
+        lda #1
+        sta SCBUSY
+        sta UIMODE
+        lda #147
+        jsr CHROUT
+        lda #<s2load
+        sta SPL
+        lda #>s2load
+        sta SPH
+        jsr prtsp
+        jsr ntname
+        lda #<s2ldh
+        sta SPL
+        lda #>s2ldh
+        sta SPH
+        jsr prtsp
+        jsr ndpurge             ; drop this type's stale entries
+        lda #0
+        sta NRECV
+        sta NSEEN
+        sta NSEENH
+        sta NTRUNC
+        sta NTMO
+        lda #4                  ; CMD_GET_CONTACTS, no 'since': all of them
+        sta TXBUF
+        lda #1
+        sta TXLEN
+        jsr sendfr
+        jsr ndline
+        lda #1
+        sta S2KEY               ; any key stops the fetch
+ndfl:   lda #0
+        sta S2HIT
+        lda #255                ; any frame; ~4.3s of silence per try
+        sta WANT2
+        sta S2TMO
+        jsr s2wait
+        bcc ndfg
+        lda S2HIT
+        bne ndfab
+; The radio can sit on a frame while it is transmitting. Three silences
+; in a row (~13s) and we keep what arrived.
+        inc NTMO
+        lda NTMO
+        cmp #3
+        bcc ndfl
+        lda #1
+        sta NTRUNC
+        jmp ndfend
+ndfg:   ldx #0
+        stx NTMO
+        cmp #2
+        beq ndfst
+        cmp #3
+        beq ndfc
+        cmp #4
+        beq ndfeok
+        cmp #1
+        beq ndferr
+        jsr dispat
+ndfnx:  lda #0
+        sta READY
+        jmp ndfl
+; RESP_CODE_CONTACTS_START carries the radio's TOTAL, all types. If that
+; many could not sit alongside what is cached, drop the cache now so this
+; type gets the whole table.
+ndfst:  lda BUF+2
+        ora BUF+3
+        ora BUF+4
+        bne ndfclr
+        lda BUF+1
+        clc
+        adc NCONT
+        bcs ndfclr
+        cmp MAXCON
+        bcc ndfnx
+        beq ndfnx
+ndfclr: lda #0
+        sta NCONT
+        ldx #4
+ndfcl2: sta TLOAD,x
+        dex
+        bpl ndfcl2
+        jmp ndfnx
+ndfc:   inc NSEEN
+        bne ndfc1
+        inc NSEENH              ; a radio can hold 350
+ndfc1:  lda BUF+33
+        cmp NTYPE
+        bne ndfsk               ; another type: not kept
+        lda NCONT
+        cmp MAXCON
+        bcc ndfc2
+        lda #1                  ; no room: count it, but this list is not
+        sta NTRUNC              ; complete and must not be kept
+        bne ndfc3
+ndfc2:  jsr rxcont
+ndfc3:  inc NRECV
+ndfsk:  jsr ndline              ; every frame, so a run of other types
+        jmp ndfnx               ; still visibly moves the count
+; Stopped by a key. The radio has no way to cancel its iterator, so the
+; rest still arrives -- and rxcont, called from dispat, keeps adding this
+; type's entries in the background. Opening the list again shows them.
+ndfab:  lda #1
+        sta NTRUNC
+        jmp ndfend
+ndferr: lda #1                  ; e.g. ERR_CODE_BAD_STATE: the radio's
+        sta NTRUNC              ; iterator was already busy
+ndfeok: lda #0
+        sta READY
+ndfend: lda #0
+        sta SCBUSY
+        sta S2KEY
+        lda SYNCP
+        beq ndfe2
+        lda #0
+        sta SYNCP
+        jsr sync
+; **Kept even when incomplete.** It used to be thrown away, so a list that
+; stalled, overflowed or was stopped was fetched again -- for minutes -- on
+; every visit. Now it stays until r.
+ndfe2:  ldx NTYPE
+        lda #1
+        sta TLOAD,x
+        jmp ndview
+
+; "checked 40  kept 12: alice"
+ndline: jsr s2up
+        lda #<s2chk
+        sta SPL
+        lda #>s2chk
+        sta SPH
+        jsr s2str
+        lda NSEEN               ; 16-bit, so through prdec
+        sta NUML
+        lda NSEENH
+        sta NUMH
+        jsr prdec
+        lda DECN                ; digits printed; 0 means it printed "0"
+        bne ndl1
+        lda #1
+ndl1:   clc
+        adc SCOL
+        sta SCOL
+        lda #<s2kept
+        sta SPL
+        lda #>s2kept
+        sta SPH
+        jsr s2str
+        lda NRECV
+        jsr s2dec
+        lda NRECV
+        beq ndl2
+        lda NTRUNC
+        bne ndl2                ; the last one was not stored
+        lda #<s2colon
+        sta SPL
+        lda #>s2colon
+        sta SPH
+        jsr s2str
+        ldx NCONT
+        dex
+        txa
+        jsr contptr             ; names are first in the slot
+        lda PTR
+        sta SPL
+        lda PTRH
+        sta SPH
+        jsr s2asc
+ndl2:   jmp s2pad
+
+; print the plural name of type NTYPE
+ntname: ldx NTYPE
+        dex
+        txa
+        asl
+        tax
+        lda nttab,x
+        sta SPL
+        lda nttab+1,x
+        sta SPH
+        jmp prtsp
+
+; ----- remove every entry of type NTYPE, closing the gaps -----
+ndpurge:
+        lda #0
+        sta NIDX
+        sta NDST
+npl:    lda NIDX
+        cmp NCONT
+        bcs npd
+        jsr contptr
+        ldy #58
+        lda (PTR),y
+        cmp NTYPE
+        beq npnx                ; this type: drop it
+        lda NIDX
+        cmp NDST
+        beq npkeep              ; already where it belongs
+        lda PTR
+        pha
+        lda PTRH
+        pha
+        lda NDST
+        jsr contptr
+        lda PTR
+        sta PTR2
+        lda PTRH
+        sta PTR2H
+        pla
+        sta PTRH
+        pla
+        sta PTR
+        ldy #63
+npc:    lda (PTR),y
+        sta (PTR2),y
+        dey
+        bpl npc
+npkeep: inc NDST
+npnx:   inc NIDX
+        jmp npl
+npd:    lda NDST
+        sta NCONT
+        rts
+
+; ----- show the cached entries of type NTYPE -----
+; NODETAB is what the menu draws (name pointers); NODEIX maps a row back
+; to its contact slot, which is what nodeact works with.
+ndview: lda #0
+        sta NVIS
+        sta NIDX
+        lda #<NODETAB
+        sta PTR2
+        lda #>NODETAB
+        sta PTR2H
+ndvl:   lda NIDX
+        cmp NCONT
+        bcs ndvd
+        jsr contptr
+        ldy #58
+        lda (PTR),y
+        cmp NTYPE
+        bne ndvn
+        ldx NVIS
+        lda NIDX
+        sta NODEIX,x
+        ldy #0
+        lda PTR
+        sta (PTR2),y
+        iny
+        lda PTRH
+        sta (PTR2),y
+        lda PTR2
+        clc
+        adc #2
+        sta PTR2
+        bcc ndv2
+        inc PTR2H
+ndv2:   inc NVIS
+ndvn:   inc NIDX
+        jmp ndvl
+ndvd:   lda NVIS
+        bne ndvd2
+; nothing of this type: say so rather than flash an empty frame
+        jsr plinit
+        jsr plnew
+        lda #<s2none
+        sta SPL
+        lda #>s2none
+        sta SPH
+        jsr plstr
+        jsr plend
+        lda #<tnodes
+        sta MNTIT
+        lda #>tnodes
+        sta MNTITH
+        jsr plshow
+        jmp mmshut
+ndvd2:  lda NTRUNC
+        beq ndshow
+; too many to hold, or the transfer stalled: show what we have, but it is
+; not cached -- next time it is fetched again
+        jsr plinit
+        jsr plnew
+        lda #<s2trn1
+        sta SPL
+        lda #>s2trn1
+        sta SPH
+        jsr plstr
+        jsr plend
+        jsr plnew
+        lda #<s2trn2
+        sta SPL
+        lda #>s2trn2
+        sta SPH
+        jsr plstr
+        jsr plend
+        lda #<tnodes
+        sta MNTIT
+        lda #>tnodes
+        sta MNTITH
+        jsr plshow
+
+; The list scrolls, twelve rows at a time.
+ndshow: lda #0
+        sta NDOFF
+        sta MNSEL
+ndpage: lda #4
+        sta MNX
+        lda #4
+        sta MNY
+        lda #30
+        sta MNW
+        lda NVIS
+        sec
+        sbc NDOFF
+        cmp #12
+        bcc ndn2
+        lda #12
+ndn2:   sta MNN
+; MNPTR = NODETAB + NDOFF*2, 16-bit now that there can be 255
+        lda NDOFF
+        asl
+        sta MNPTR
+        lda #0
+        rol
+        sta MNPTRH
+        lda MNPTR
+        clc
+        adc #<NODETAB
+        sta MNPTR
+        lda MNPTRH
+        adc #>NODETAB
+        sta MNPTRH
+        ldx NTYPE
+        dex
+        txa
+        asl
+        tax
+        lda nttit,x
+        sta MNTIT
+        lda nttit+1,x
+        sta MNTITH
+        lda #147
+        jsr CHROUT
+        jsr mnbox
+        jsr mnitems
+        lda MNY                 ; the hint goes under the frame
+        clc
+        adc MNN
+        adc #3
+        sta MNROW
+        jsr scrpos
+        lda #12
+        sta MNCLR
+        lda #<ndhint
+        sta SPL
+        lda #>ndhint
+        sta SPH
+        lda #1
+        sta MNCOL
+        jsr mnstr
+ndkey:  jsr tkey
+        jsr poll
+        lda READY
+        beq ndk2
+        jsr dispat
+        lda #0
+        sta READY
+ndk2:   jsr GETIN
+        cmp #0
+        beq ndkey
+        cmp #17
+        beq nddn
+        cmp #145
+        beq ndup
+        cmp #13
+        beq ndtake
+        cmp #133
+        beq ndcan
+        cmp #82                 ; r / R: fetch this type again
+        beq ndref
+        cmp #210
+        beq ndref
+        jmp ndkey
+ndref:  ldx NTYPE
+        lda #0
+        sta TLOAD,x
+        jmp ndfetch
+nddn:   lda MNSEL
+        clc
+        adc #1
+        cmp MNN
+        bcc nddn2
+; off the bottom: scroll if there is more below, otherwise wrap to the top
+        lda NDOFF
+        clc
+        adc MNN
+        cmp NVIS
+        bcs ndwrap
+        inc NDOFF
+        jmp ndpage              ; MNSEL stays on the last row
+nddn2:  sta MNSEL
+        jsr mnitems
+        jmp ndkey
+ndwrap: lda #0
+        sta NDOFF
+        sta MNSEL
+        jmp ndpage
+ndup:   lda MNSEL
+        bne ndup2
+        lda NDOFF
+        beq ndlast              ; at the very top: wrap to the end
+        dec NDOFF
+        jmp ndpage              ; MNSEL stays on the first row
+ndup2:  sec
+        sbc #1
+        sta MNSEL
+        jsr mnitems
+        jmp ndkey
+ndlast: lda NVIS
+        cmp #12
+        bcc ndsml
+        sec
+        sbc #12
+        sta NDOFF
+        lda #11
+        sta MNSEL
+        jmp ndpage
+ndsml:  lda #0
+        sta NDOFF
+        lda NVIS
+        sec
+        sbc #1
+        sta MNSEL
+        jmp ndpage
+ndtake: lda NDOFF
+        clc
+        adc MNSEL
+        tax
+        lda NODEIX,x
+        sta CIDX
+        jmp nodeact
+ndcan:  jmp mmshut
+
+
+; ===== direct-message conversations ====================================
+; Channels 40-47. Each has the contact's 6-byte key prefix in DMKEYS and
+; its name in the ordinary channel-name table, so the picker, the prompt,
+; the unread counters and the archive all treat it as a channel.
+
+; open the selected contact's conversation and switch to it
+dmopen: lda CIDX
+        jsr contptr
+        ldy #17                 ; key starts at 17 in a contact slot
+        ldx #0
+dmo1:   lda (PTR),y
+        sta DMNK,x
+        iny
+        inx
+        cpx #6
+        bcc dmo1
+        lda PTR                 ; the name is first in the slot
+        sta SPL
+        lda PTRH
+        sta SPH
+        jsr dmslot
+        sta CC
+        jmp mmshut              ; clears and runs setchan
+
+; an incoming DM: key at BUF+4. Returns its conversation in A.
+dmin:   ldx #0
+dmi1:   lda BUF+4,x
+        sta DMNK,x
+        inx
+        cpx #6
+        bcc dmi1
+        lda #0
+        sta SPH                 ; no name unless the contact is known
+        jsr dmwho
+        bcs dmi2
+        lda PTR
+        sta SPL
+        lda PTRH
+        sta SPH
+dmi2:   jmp dmslot
+
+; DMNK = key prefix, SPL/SPH = its ASCII name (SPH 0: none).
+; Returns A = 40 + the slot already holding that key, or a new one -- a
+; free slot first, else the next in rotation.
+dmslot: lda #0
+        sta DSN
+dsl1:   ldx DSN
+        cpx #8
+        bcs dsnew
+        lda DMUSE,x
+        beq dsnx
+        jsr dsoff
+        ldx #0
+dsl2:   lda DMKEYS,y
+        cmp DMNK,x
+        bne dsnx
+        iny
+        inx
+        cpx #6
+        bcc dsl2
+; Already open. If we now know the name, use it: a DM that arrived before
+; the node list was loaded opened the conversation as "dm xxxxxx".
+        lda SPH
+        beq dsret
+        jmp dsnm
+dsnx:   inc DSN
+        jmp dsl1
+dsnew:  ldx #0
+dsf:    lda DMUSE,x
+        beq dsgot
+        inx
+        cpx #8
+        bcc dsf
+        lda DMNEXT              ; all eight in use: recycle the next one
+        tax
+        clc
+        adc #1
+        and #7
+        sta DMNEXT
+dsgot:  stx DSN
+        lda #1
+        sta DMUSE,x
+; a recycled slot's unread belonged to someone else -- take it back off
+; the "+N" total too
+        txa
+        clc
+        adc #40
+        tax
+        lda UT
+        sec
+        sbc CUNR,x
+        bcs dsut
+        lda #0
+dsut:   sta UT
+        lda #0
+        sta CUNR,x
+        jsr dsoff
+        ldx #0
+dsk:    lda DMNK,x
+        sta DMKEYS,y
+        iny
+        inx
+        cpx #6
+        bcc dsk
+; the name, into the channel-name table as PETSCII
+dsnm:   lda DSN
+        clc
+        adc #40
+        jsr chnptr
+        ldy #0
+        lda SPH
+        beq dsanon
+dsn1:   lda (SPL),y
+        beq dsn2
+        cmp #65
+        bcc dsn4
+        cmp #91
+        bcs dsn3
+        ora #32                 ; same case swap as s2asc
+        bne dsn4
+dsn3:   cmp #97
+        bcc dsn4
+        cmp #123
+        bcs dsn4
+        and #223
+dsn4:   sta (PTR),y
+        iny
+        cpy #16
+        bcc dsn1
+dsn2:   lda #0
+        sta (PTR),y
+        jmp dsret
+; not in the node list: "dm" and the first three key bytes in hex
+dsanon: lda #68                 ; 'd'
+        sta (PTR),y
+        iny
+        lda #77                 ; 'm'
+        sta (PTR),y
+        iny
+        lda #32
+        sta (PTR),y
+        iny
+        ldx #0
+dsh1:   lda DMNK,x
+        lsr
+        lsr
+        lsr
+        lsr
+        jsr dshex
+        lda DMNK,x
+        and #15
+        jsr dshex
+        inx
+        cpx #3
+        bcc dsh1
+        jmp dsn2
+dshex:  cmp #10
+        bcc dshx2
+        adc #6                  ; carry set: +7, 10 -> 'a'
+dshx2:  adc #48
+        sta (PTR),y
+        iny
+        rts
+dsret:  lda DSN
+        clc
+        adc #40
+        rts
+; Y = DSN * 6
+dsoff:  lda DSN
+        asl
+        sta S2T
+        asl
+        clc
+        adc S2T
+        tay
+        rts
+
+; Called by setchan: in a DM conversation, typing goes to its contact.
+; Anywhere else it goes to the channel -- this is what clears DMON, which
+; nothing used to.
+dmsel:  lda CC
+        cmp #40
+        bcc dmoff
+        cmp #48
+        bcs dmoff
+        sec
+        sbc #40
+        sta DSN
+        jsr dsoff
+        ldx #0
+dms1:   lda DMKEYS,y
+        sta DMKEY,x
+        iny
+        inx
+        cpx #6
+        bcc dms1
+        lda #1
+        sta DMON
+        rts
+dmoff:  lda #0
+        sta DMON
+        rts
+
+; ===== segment 2 strings (ascii; CHROUT shows them as the rest of the ui)
+s2refr: .text "refreshing channels.. please wait"
+        .byte 13
+        .text "(any key aborts)"
+        .byte 13,0
+s2boot: .text "scanning for channels,"
+        .byte 13
+        .text "press any key to abort"
+        .byte 13,0
+s2skip: .text "skipped. f1, channels scans later."
+        .byte 13,0
+s2slot: .text "slot "
+        .byte 0
+s2of40: .text "/40  found "
+        .byte 0
+s2colon: .text ": "
+        .byte 0
+s2cfnd: .text "channels found: "
+        .byte 0
+s2abt:  .text " (aborted)"
+        .byte 0
+s2load: .text "loading "
+        .byte 0
+s2ldh:  .text "..."
+        .byte 13
+        .text "the radio sends every node, about"
+        .byte 13
+        .text "2.5s each at 600 baud. kept in memory"
+        .byte 13
+        .text "after, r in the list re-reads it."
+        .byte 13
+        .text "any key stops and keeps what arrived."
+        .byte 13,13,0
+s2chk:  .text "checked "
+        .byte 0
+s2kept: .text "  kept "
+        .byte 0
+s2none: .text "none found"
+        .byte 0
+s2trn1: .text "list incomplete - showing what"
+        .byte 0
+s2trn2: .text "arrived. r in the list reloads"
+        .byte 0
+ndhint: .text "return pick  r refresh  f1 back"
+        .byte 0
+nt1:    .text "companions"
+        .byte 0
+nt2:    .text "repeaters"
+        .byte 0
+nt3:    .text "room servers"
+        .byte 0
+nt4:    .text "sensors"
+        .byte 0
+nttab:  .word nt1,nt2,nt3,nt4
+tt1:    .text " companions "
+        .byte 0
+tt2:    .text " repeaters "
+        .byte 0
+tt3:    .text " room servers "
+        .byte 0
+tt4:    .text " sensors "
+        .byte 0
+nttit:  .word tt1,tt2,tt3,tt4
+sradz:  .text "send advert: zero hop"
+        .byte 0
+sradf:  .text "send advert: flood"
+        .byte 0
+sadsz:  .text "zero-hop advert sent"
+        .byte 0
+sadsf:  .text "flood advert sent"
+        .byte 0
+
+; ===== segment 2 variables =============================================
+; Re-initialised by the copy at every boot.
+SCBUSY: .byte 0                 ; a scan / fetch owns the link: defer sync
+SYNCP:  .byte 0                 ; ...and one was asked for meanwhile
+SCMODE: .byte 0                 ; 1 = boot scan: header printed, keep screen
+SCABT:  .byte 0
+CSTMO:  .byte 0
+NFOUND: .byte 0
+LASTF:  .byte 0
+SCNMAX: .byte 0                 ; slots the last scan actually read
+MCH:    .byte 0                 ; channel of the message being archived
+SCOL:   .byte 0
+S2T:    .byte 0
+WJ2:    .byte 0
+WANT2:  .byte 0
+S2TMO:  .byte 0
+CBASEH: .byte 128               ; contact table, high byte
+NTYPE:  .byte 0
+NVIS:   .byte 0
+NIDX:   .byte 0
+NDST:   .byte 0
+NRECV:  .byte 0                 ; kept
+NSEEN:  .byte 0                 ; every contact frame, any type
+NSEENH: .byte 0
+NTRUNC: .byte 0
+NTMO:   .byte 0
+ADVF:   .byte 0
+TLOAD:  .byte 0,0,0,0,0         ; per type: fetched, shown from memory
+S2KEY:  .byte 0                 ; s2wait: a key also ends the wait
+S2HIT:  .byte 0                 ; ...and this is the key
+DSN:    .byte 0
+DMNEXT: .byte 0
+DMNK:   .byte 0,0,0,0,0,0
+DMUSE:  .byte 0,0,0,0,0,0,0,0
+DMKEYS: .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+        .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+
+; ===== radio configuration =============================================
+; Each line renders the live value; RETURN on it steps to the next preset.
+; "apply" writes them to the node.
+radiovw:
+        lda #1
+        sta UIMODE
+        lda #0
+        sta MNSEL
+; **Ask the radio what it is actually set to, right now.**
+; These values arrived once, in the handshake reply, and were never read
+; again -- so anything changed since boot, by us or from a phone, showed
+; stale. APP_START is the only command that returns SELF_INFO, and dself
+; refills RFREQ/RBW/RSF/RCR/RPWR from it.
+        jsr rvload
+        jsr rvseed
+rvdraw: jsr plinit
+; --- frequency, shown in MHz from a kHz value ---
+        jsr plnew
+        lda #<srfreq
+        sta SPL
+        lda #>srfreq
+        sta SPH
+        jsr plstr
+        lda RFREQ
+        sta NUML
+        lda RFREQ+1
+        sta NUMH
+        lda RFREQ+2
+        sta NUM2
+        lda RFREQ+3
+        sta NUM3
+        jsr pldec
+        lda #<skhz
+        sta SPL
+        lda #>skhz
+        sta SPH
+        jsr plstr
+        jsr plend
+; --- bandwidth ---
+        jsr plnew
+        lda #<srbw
+        sta SPL
+        lda #>srbw
+        sta SPH
+        jsr plstr
+        lda RBW
+        sta NUML
+        lda RBW+1
+        sta NUMH
+        lda RBW+2
+        sta NUM2
+        lda RBW+3
+        sta NUM3
+        jsr pldec
+        lda #<shz
+        sta SPL
+        lda #>shz
+        sta SPH
+        jsr plstr
+        jsr plend
+; --- spreading factor ---
+        jsr plnew
+        lda #<srsf
+        sta SPL
+        lda #>srsf
+        sta SPH
+        jsr plstr
+        lda RSF
+        sta NUML
+        lda #0
+        sta NUMH
+        sta NUM2
+        sta NUM3
+        jsr pldec
+        jsr plend
+; --- coding rate ---
+        jsr plnew
+        lda #<srcr
+        sta SPL
+        lda #>srcr
+        sta SPH
+        jsr plstr
+        lda RCR
+        sta NUML
+        lda #0
+        sta NUMH
+        sta NUM2
+        sta NUM3
+        jsr pldec
+        jsr plend
+; --- transmit power ---
+        jsr plnew
+        lda #<srpwr
+        sta SPL
+        lda #>srpwr
+        sta SPH
+        jsr plstr
+        lda RPWR
+        sta NUML
+        lda #0
+        sta NUMH
+        sta NUM2
+        sta NUM3
+        jsr pldec
+        lda #<sdbm
+        sta SPL
+        lda #>sdbm
+        sta SPH
+        jsr plstr
+        jsr plend
+; --- node name ---
+        jsr plnew
+        lda #<srname
+        sta SPL
+        lda #>srname
+        sta SPH
+        jsr plstr
+        jsr plend
+; --- actions ---
+        jsr plnew
+        lda #<srapply
+        sta SPL
+        lda #>srapply
+        sta SPH
+        jsr plstr
+        jsr plend
+        jsr plnew
+        lda #<sradz
+        sta SPL
+        lda #>sradz
+        sta SPH
+        jsr plstr
+        jsr plend
+        jsr plnew
+        lda #<sradf
+        sta SPL
+        lda #>sradf
+        sta SPH
+        jsr plstr
+        jsr plend
+        jsr plnew
+        lda #<srback
+        sta SPL
+        lda #>srback
+        sta SPH
+        jsr plstr
+        jsr plend
+
+        lda #147
+        jsr CHROUT
+        lda #4
+        sta MNX
+        lda #6
+        sta MNY
+        lda #28
+        sta MNW
+        lda PLN
+        sta MNN
+        lda #<PLTAB
+        sta MNPTR
+        lda #>PLTAB
+        sta MNPTRH
+        lda #<tradio
+        sta MNTIT
+        lda #>tradio
+        sta MNTITH
+        jsr menu
+        lda MNSEL
+        cmp #255
+        beq rvdone
+        cmp #0
+        beq rvfreq
+        cmp #1
+        beq rvbw
+        cmp #2
+        beq rvsf
+        cmp #3
+        beq rvcr
+        cmp #4
+        beq rvpwr
+        cmp #5
+        beq rvname
+        cmp #6
+        beq rvapply
+        cmp #7
+        beq rvadz
+        cmp #8
+        beq rvadf
+rvdone: lda #0
+        sta UIMODE
+        jmp mmshut
+
+; step frequency through the common band presets
+rvfreq: inc RIDX
+        lda RIDX
+        cmp #5
+        bcc rvf2
+        lda #0
+        sta RIDX
+rvf2:   lda RIDX
+        asl
+        asl
+        tay
+        ldx #0
+rvf3:   lda freqtab,y
+        sta RFREQ,x
+        iny
+        inx
+        cpx #4
+        bcc rvf3
+        jmp rvdraw
+; and bandwidth
+rvbw:   inc RBIDX
+        lda RBIDX
+        cmp #4
+        bcc rvb2
+        lda #0
+        sta RBIDX
+rvb2:   lda RBIDX
+        asl
+        asl
+        tay
+        ldx #0
+rvb3:   lda bwtab,y
+        sta RBW,x
+        iny
+        inx
+        cpx #4
+        bcc rvb3
+        jmp rvdraw
+; sf 7..12, cr 5..8, power in 3dBm steps up to the node's maximum
+rvsf:   inc RSF
+        lda RSF
+        cmp #13
+        bcc rvs2
+        lda #7
+        sta RSF
+rvs2:   jmp rvdraw
+rvcr:   inc RCR
+        lda RCR
+        cmp #9
+        bcc rvc2
+        lda #5
+        sta RCR
+rvc2:   jmp rvdraw
+rvpwr:  lda RPWR
+        clc
+        adc #3
+        cmp RMAXP
+        bcc rvp3
+        beq rvp3
+        lda #2
+rvp3:   sta RPWR
+        jmp rvdraw
+
+; Re-read the node's live settings. UIMODE is already 1, so nothing that
+; arrives while we wait will print over the panel.
+rvload: lda #<pyastart
+        sta PTR
+        lda #>pyastart
+        sta PTRH
+        lda #11
+        jsr setpay
+        jsr sendfr
+        lda #0
+        sta STGBIT              ; not a handshake stage
+        lda #5                  ; RESP_CODE_SELF_INFO
+        jmp waitop
+
+; Line the two cycling fields up with reality.
+;
+; Both step with "inc <index>", and the index started at zero whatever the
+; radio was actually on -- so the first keypress jumped to preset 1 and
+; discarded the node's real setting without ever showing it as a choice.
+; Find the live value in the table instead. 255 means "not one of the
+; presets", and inc takes that to 0, which is the sensible place to start.
+rvseed: lda #255
+        sta RIDX
+        ldy #16                 ; five presets, four bytes each
+rvq1:   lda freqtab,y
+        cmp RFREQ
+        bne rvq2
+        lda freqtab+1,y
+        cmp RFREQ+1
+        bne rvq2
+        lda freqtab+2,y
+        cmp RFREQ+2
+        bne rvq2
+        lda freqtab+3,y
+        cmp RFREQ+3
+        bne rvq2
+        tya
+        lsr
+        lsr
+        sta RIDX
+rvq2:   tya
+        sec
+        sbc #4
+        tay
+        bpl rvq1
+        lda #255
+        sta RBIDX
+        ldy #12                 ; four presets
+rvq3:   lda bwtab,y
+        cmp RBW
+        bne rvq4
+        lda bwtab+1,y
+        cmp RBW+1
+        bne rvq4
+        lda bwtab+2,y
+        cmp RBW+2
+        bne rvq4
+        lda bwtab+3,y
+        cmp RBW+3
+        bne rvq4
+        tya
+        lsr
+        lsr
+        sta RBIDX
+rvq4:   tya
+        sec
+        sbc #4
+        tay
+        bpl rvq3
+        rts
+
+; ask for a node name and set it
+rvname: lda #<tname
+        sta MNTIT
+        lda #>tname
+        sta MNTITH
+        jsr inpget
+        lda INPOK
+        beq rvn3
+        lda INPLEN
+        beq rvn3
+        lda #8                  ; CMD_SET_ADVERT_NAME
+        sta TXBUF
+        ldx #0
+rvn2:   cpx INPLEN
+        bcs rvn2d
+        lda INPASC,x
+        sta TXBUF+1,x
+        inx
+        jmp rvn2
+rvn2d:  txa
+        clc
+        adc #1
+        sta TXLEN
+        jsr sendfr
+rvn3:   lda #1
+        sta UIMODE
+        jmp rvdraw
+
+; write them to the node: radio params, then tx power
+rvapply:
+        lda #11                 ; CMD_SET_RADIO_PARAMS
+        sta TXBUF
+        ldx #0
+rva2:   lda RFREQ,x
+        sta TXBUF+1,x
+        lda RBW,x
+        sta TXBUF+5,x
+        inx
+        cpx #4
+        bcc rva2
+        lda RSF
+        sta TXBUF+9
+        lda RCR
+        sta TXBUF+10
+        lda #11
+        sta TXLEN
+        jsr sendfr
+        lda #12                 ; CMD_SET_RADIO_TX_POWER
+        sta TXBUF
+        lda RPWR
+        sta TXBUF+1
+        lda #2
+        sta TXLEN
+        jsr sendfr
+        jsr plinit
+        jsr plnew
+        lda #<srsent
+        sta SPL
+        lda #>srsent
+        sta SPH
+        jsr plstr
+        jsr plend
+        lda #<tradio
+        sta MNTIT
+        lda #>tradio
+        sta MNTITH
+        jsr plshow
+        jmp mmshut
+
+; 910.525, 869.525, 868.000, 906.875, 433.500 -- all in kHz.
+;
+; **910.525 is FIRST on purpose.** It is MeshCore's US frequency, and the
+; slot it replaced held 915.000 -- the band edge, not the frequency the US
+; mesh actually runs on. A node still sitting on 915.000 does not match
+; any entry here, so rvseed leaves the index at 255 and the first press
+; lands on entry 0. Putting the US preset there makes that first press the
+; useful one instead of a walk through two EU bands.
+; ----- send an advert -----
+; CMD_SEND_SELF_ADVERT, and its one optional byte picks the reach:
+; 0 = zero hop (neighbours that hear us directly), 1 = flood (repeated
+; across the mesh).
+rvadz:  lda #0
+        beq rvadv
+rvadf:  lda #1
+rvadv:  sta ADVF
+        sta TXBUF+1
+        lda #1                  ; menu() cleared it; the panel needs it
+        sta UIMODE
+        lda #7
+        sta TXBUF
+        lda #2
+        sta TXLEN
+        jsr sendfr
+        jsr plinit
+        jsr plnew
+        lda ADVF
+        bne rvadv2
+        lda #<sadsz
+        sta SPL
+        lda #>sadsz
+        sta SPH
+        jmp rvadv3
+rvadv2: lda #<sadsf
+        sta SPL
+        lda #>sadsf
+        sta SPH
+rvadv3: jsr plstr
+        jsr plend
+        lda #<tradio
+        sta MNTIT
+        lda #>tradio
+        sta MNTITH
+        jsr plshow
+        jmp mmshut
+
+freqtab: .byte 189,228,13,0
+        .byte 149,68,13,0
+        .byte 160,62,13,0
+        .byte 123,214,13,0
+        .byte 92,157,6,0
+; 250k, 125k, 62.5k, 500k -- in Hz
+bwtab:  .byte 144,208,3,0
+        .byte 72,232,1,0
+        .byte 36,244,0,0
+        .byte 32,161,7,0
+
+
+
+; ===== contacts ========================================================
+; PTR -> contact slot for the index in A
+contptr:
+        sta PTR
+        lda #0
+        sta PTRH
+        ldx #6
+cptl:   asl PTR
+        rol PTRH
+        dex
+        bne cptl
+; the table base is page-aligned and depends on the reu: see s2init
+        lda PTRH
+        clc
+        adc CBASEH
+        sta PTRH
+        rts
+
+; RESP_CODE_CONTACT: 1-32 key, 33 type, 34 flags, 35 out_path_len,
+; 36-99 route, 100-131 name. Keep the parts we can act on.
+; Only the type being fetched. The radio sends every contact -- it has no
+; type filter -- so the choice is made here.
+rxcont: lda BUF+33
+        cmp NTYPE
+        bne rxcrt
+        lda NCONT
+        cmp MAXCON
+        bcs rxcrt               ; table full; the rest are dropped
+        lda NCONT
+        jsr contptr
+; Take the name from the RAW frame, not the converted copy. conv() makes
+; PETSCII for CHROUT, but the menu draws through a2s, which expects ASCII
+; -- running both turned every name uppercase.
+        ldy #0
+rxcnl:  cpy #16
+        bcs rxcnd
+        lda BUF+100,y
+        beq rxcnd
+        cmp #32                 ; keep anything unprintable out of the list
+        bcc rxcdot
+        cmp #127
+        bcc rxcsv
+rxcdot: lda #46
+rxcsv:  sta (PTR),y
+        iny
+        jmp rxcnl
+rxcnd:  lda #0
+        sta (PTR),y
+; the key comes from the RAW buffer -- it is binary, not text
+        ldx #0
+rxcpl:  cpx #32
+        bcs rxcpd
+        txa
+        clc
+        adc #17
+        tay
+        lda BUF+1,x
+        sta (PTR),y
+        inx
+        jmp rxcpl
+rxcpd:  ldy #49
+        lda BUF+35              ; out_path_len; $ff means "no route, flood"
+        sta (PTR),y
+        ldx #0
+rxcrl:  cpx #8
+        bcs rxcrd
+        txa
+        clc
+        adc #50
+        tay
+        lda BUF+36,x
+        sta (PTR),y
+        inx
+        jmp rxcrl
+rxcrd:  ldy #58
+        lda BUF+33
+        sta (PTR),y
+        inc NCONT
+rxcrt:  rts
+
+
+"""
+
 # 2400 is THE speed. The slower rates are kept only because the bit period
 # is a build-time constant either way, so they cost nothing and leave a way
 # back if real hardware disagrees with the emulator -- they are not tested,
@@ -5416,24 +6940,52 @@ TESTKEYS = {
     # f5 scrollback then out, f7, and back to channel 1. F1 now opens a
     # menu before the picker, hence the extra RETURN.
     1: [[133, 13, 50], [104, 105, 13], [135, 32], [136], [133, 13, 49]],
-    # f1 -> add/remove channel -> add -> slot 5, name "mych", key "abcd"
-    2: [[133, 17, 17, 17, 17, 13], [13], [53, 13],
+    # f1 -> add/remove channel -> add -> name "mych", key "abcd". No slot
+    # step any more: the free slot is found for us.
+    2: [[133, 17, 17, 17, 17, 13], [13],
         [77, 89, 67, 72, 13], [65, 66, 67, 68, 13]],
+    # the #channel case: a name, then RETURN on an EMPTY key field
+    22: [[133, 17, 17, 17, 17, 13], [13],
+         [35, 111, 112, 101, 110, 13], [13]],
+    # backing out of the key prompt with f1 must return to chat, not hang
+    23: [[133, 17, 17, 17, 17, 13], [13],
+         [77, 89, 67, 72, 13], [133]],
+    # add/remove -> remove: the chooser lists channels BY NAME now, so
+    # the last RETURN picks the first one -- without it the script stops
+    # AT the chooser and never exercises the removal at all.
+    24: [[133, 17, 17, 17, 17, 13], [17, 13], [13]],
     # f1 -> nodes -> first contact -> show route. No dismissing key: the
     # panel has to still be up when the screenshot is taken.
-    3: [[133, 17, 13], [13], [17, 17, 17, 13]],
+    3: [[133, 17, 13], [13], [13], [17, 17, 17, 13]],
     # f1 -> nodes -> first contact -> telemetry
-    4: [[133, 17, 13], [13], [17, 17, 13]],
+    4: [[133, 17, 13], [13], [13], [17, 17, 13]],
     # f1 -> nodes -> first contact -> log in, password "pass"
-    5: [[133, 17, 13], [13], [17, 13], [80, 65, 83, 83, 13]],
+    5: [[133, 17, 13], [13], [13], [17, 13], [80, 65, 83, 83, 13]],
     # f1 -> nodes -> first contact -> send message, then type "hi"
-    6: [[133, 17, 13], [13], [13], [72, 73, 13]],
+    6: [[133, 17, 13], [13], [13], [13], [72, 73, 13]],
     # let a few messages arrive (DEL is harmless on an empty line), then f5
     19: [[20], [20], [20], [20], [135]],
     # f1 -> nodes, then page down past the twelfth entry
-    20: [[133, 17, 13], [17, 17, 17, 17, 17, 17, 17, 17],
+    20: [[133, 17, 13], [13], [17, 17, 17, 17, 17, 17, 17, 17],
          [17, 17, 17, 17, 17]],
     21: [],
+    # ---- v2.3.1 ----
+    # into #Test and stay there: its messages must PRINT, not count "+1"
+    30: [[133, 13, 50]],
+    # nodes -> companions (list stays up for the shot)
+    31: [[133, 17, 13], [13]],
+    # nodes -> repeaters
+    32: [[133, 17, 13], [17, 13]],
+    # radio config -> up twice wraps to "send advert: flood"
+    33: [[133, 17, 17, 17, 13], [145, 145, 13]],
+    # picker -> r: a full refresh with its status line, then the picker
+    34: [[133, 13], [82]],
+    # companions, out, companions again: the second must come from the
+    # cache -- one GET_CONTACTS in the radio log, not two
+    35: [[133, 17, 13], [13], [133], [133, 17, 13], [13]],
+    # v2.3.3: let long messages arrive in Public, go to #Test, f7 back --
+    # the repainted history must show every line of each message
+    36: [[20], [20], [20], [20], [20], [133, 13, 50], [20], [136]],
     # f1 -> radio config -> node name -> type "c64"
     7: [[133, 17, 17, 17, 13], [145, 145, 145, 13], [67, 54, 52, 13]],
     # ---- documentation screenshots ----
@@ -5443,14 +6995,14 @@ TESTKEYS = {
     # all, so a script that ends in one cannot advance past it.
     10: [[133]],                                   # the f1 menu
     11: [[133, 13]],                               # channel picker
-    12: [[133, 17, 13]],                           # node list
-    13: [[133, 17, 13], [13]],                     # what to do with a node
+    12: [[133, 17, 13], [13]],                     # node list
+    13: [[133, 17, 13], [13], [13]],               # what to do with a node
     14: [[133, 17, 17, 13]],                       # stats
     15: [[133, 17, 17, 17, 13]],                   # radio config
     16: [[133, 17, 17, 17, 13], [145, 145, 145, 13],
          [67, 54, 52]],                            # node name, mid-typing
-    17: [[133, 17, 13], [13], [17, 17, 17, 13]],   # show route
-    18: [[133, 17, 17, 17, 17, 13], [13]],         # channel slot prompt
+    17: [[133, 17, 13], [13], [13], [17, 17, 17, 13]],  # show route
+    18: [[133, 17, 17, 17, 17, 13], [13]],         # channel name prompt
 }
 
 
@@ -5488,6 +7040,36 @@ def artwork():
             + blk("logo.bin", "logodat"))
 
 
+S2ORG = 0xA000
+
+
+def assemble2(src1, src2):
+    """
+    Two segments that call each other. Addressing modes are chosen from the
+    operand's spelling, never its value, so a placeholder address yields
+    the same sizes as the real one: two passes settle, and the third
+    asserts it.
+    """
+    labels2 = [p[0] for p in (parse(l) for l in src2.splitlines())
+               if p and p[0]]
+    src1 = src1 + "\ns2img:\n"
+    eq1 = dict(EQU)
+    eq1.update({n: S2ORG for n in labels2})
+    eq1["S2PG"] = 1
+    prev = None
+    for _ in range(4):
+        code1, syms1 = assemble(src1, ORG, eq1)
+        eq2 = {k: v for k, v in syms1.items() if k not in labels2}
+        code2, syms2 = assemble(src2, S2ORG, eq2)
+        eq1 = dict(EQU)
+        eq1.update({n: syms2[n] for n in labels2})
+        eq1["S2PG"] = (len(code2) + 255) // 256
+        if (code1, code2) == prev:
+            return code1, dict(syms1, **syms2), code2
+        prev = (code1, code2)
+    raise ValueError("segments did not settle")
+
+
 def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
           latadj=275):
     baud = RATES[ctrl]
@@ -5506,17 +7088,23 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
     # LATADJ lets that be swept, because getting it wrong shows up as
     # samples drifting toward a bit edge where badline jitter tips them over.
     half = int(round(bit * 1.5)) - latadj
-    code, syms = assemble(SRC + keytable(testk) + artwork(), ORG, EQU)
+    # the connecting line names the rate this image was built for
+    msg = 'msgcon: .text "connecting..."'
+    assert SRC.count(msg) == 1, "msgcon"
+    src1 = SRC.replace(msg, 'msgcon: .text "connecting at %d baud..."' % baud)
+    code, syms, code2 = assemble2(src1 + keytable(testk) + artwork(),
+                                  SRC2 + sha256_6502.source())
     code = bytearray(code)
     # Buffers that are indexed, not just read, and so will corrupt a
     # neighbour rather than fail loudly if they collide. PKBUF sitting
     # immediately after CONTACTS is exactly the adjacency worth checking.
     regions = [("CONTACTS", 96 * 64), ("PKBUF", 10 * 32),
-               ("CHNAM", 40 * 18), ("NODENM", 20), ("NODETAB", 96 * 2),
+               ("CHNAM", 48 * 18), ("CUNR", 48), ("PROMPT", 80), ("NODENM", 20), ("NODETAB", 255 * 2),
+               ("NODEIX", 255),
                ("PLTAB", 10 * 2),
                ("DECBUF", 12), ("CHNAME", 32), ("FWVER", 20),
                ("INPASC", 32), ("SECBUF", 16),
-               ("PLBUF", 8 * 32), ("RBUF", 256), ("TXBUF", 256),
+               ("PLBUF", 10 * 32), ("RBUF", 256), ("TXBUF", 256),
                ("SBUF", 256), ("CBUF", 256), ("BUF", 256),
                ("BMBASE", 8000), ("BMCOL", 1000)]
     spans = sorted((EQU[n], EQU[n] + sz, n) for n, sz in regions)
@@ -5535,16 +7123,25 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
             % (end, EQU["BMBASE"]))
     nbit = int(round(NTSC / float(baud)))
     nhalf = int(round(nbit * 1.5)) - latadj
-    vals = [("btlo", bit & 0xFF), ("bthi", bit >> 8),
+    vals = [("btlo", (bit - 1) & 0xFF), ("bthi", (bit - 1) >> 8),
             ("hblo", half & 0xFF), ("hbhi", half >> 8),
             ("blankb", blank), ("testk", testk)]
     # the runtime table: PAL quad then NTSC quad, contiguous
-    for i, v in enumerate([bit & 0xFF, bit >> 8, half & 0xFF, half >> 8,
-                           nbit & 0xFF, nbit >> 8, nhalf & 0xFF, nhalf >> 8]):
+    for i, v in enumerate([(bit - 1) & 0xFF, (bit - 1) >> 8, half & 0xFF, half >> 8,
+                           (nbit - 1) & 0xFF, (nbit - 1) >> 8, nhalf & 0xFF, nhalf >> 8]):
         code[syms["bitpal"] - ORG + i] = v
     for name, val in vals:
         code[syms[name] - ORG] = val
-    prg = bytes([ORG & 0xFF, ORG >> 8]) + bytes(code)
+    # Segment 2 rides directly behind segment 1 and is copied to $a000 at
+    # startup. While loaded it sits on top of $4000, which is fine -- that
+    # is splash/archive RAM nothing touches before the copy -- but it must
+    # not reach the contact table or the buffers above it.
+    if end + len(code2) > 0x8000:
+        raise ValueError("loaded image ends at $%04X, into $8000"
+                         % (end + len(code2)))
+    if len(code2) > 0x2000:
+        raise ValueError("segment 2 is %d bytes, over 8K" % len(code2))
+    prg = bytes([ORG & 0xFF, ORG >> 8]) + bytes(code) + bytes(code2)
     with open(out, "wb") as f:
         f.write(prg)
     return code, syms, prg, bit, half
@@ -5561,6 +7158,7 @@ if __name__ == "__main__":
           % (RATES[ctrl], bit, half, int(round(NTSC / float(RATES[ctrl]))),
              int(round(NTSC / float(RATES[ctrl])) * 1.5) - latadj))
     print("; assembled %d bytes at $%04X" % (len(code), ORG))
+    print("; segment 2: %d bytes at $%04X" % (len(prg) - 2 - (syms["s2img"] - ORG), S2ORG))
     for n in ("main", "serini", "nmih", "txbyte", "sendfr", "poll", "handshk"):
         print(";   %-8s = $%04X" % (n, syms[n]))
     print("; wrote %s (%d bytes)" % (out, len(prg)))
