@@ -1,0 +1,3 @@
+6e6027075722f749ae36880442615c4b  firmware-heltec-v3-ble-7200-v1.17.1-c64-7200-app.bin
+be2bc86761d573990236ea0709e9b9bd  firmware-heltec-v3-ble-7200-v1.17.1-c64-7200-merged.bin
+82fd22e88ab52e3295d2b6e805d966f0  meshcore64-firmware-v1.17.1-c64-7200.patch
