@@ -1,0 +1,2 @@
+9653cf2429a3d4cef27bf3c59dfba856  firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-app.bin
+09ae327b239e413ef4d8c8e68f48208a  firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin
