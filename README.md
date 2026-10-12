@@ -185,6 +185,35 @@ Because a cartridge cannot safely probe the GeoRAM window, **the cartridge build
 a GeoRAM**: with a GeoRAM or NeoRAM use the PRG or D64. An REU (including the Ultimate's) works
 with every format, and so does the Ultimate's clock.
 
+### Making a cartridge
+
+**Ultimate II+ and similar:** copy `meshcore64-v2.0.crt` to the device and run it. Nothing to build.
+
+**Your own EPROM cartridge:** burn `meshcore64-v2.0.bin` to a **27C512** (64K). It is one flat image,
+the eight 8K banks end to end, and the unused tail is `$FF` (erased state). The `.crt` is the same
+contents in the container emulators expect: it is **Magic Desk** (cartridge type 19), so VICE
+runs it too (`x64sc -cartcrt meshcore64-v2.0.crt`).
+
+| | |
+|---|---|
+| ROM | 27C512, 64K. About 41K is used (banks 0-4); the rest is `$FF` |
+| Maps at | `$8000`-`$9FFF`, one 8K bank at a time |
+| Bank register | write `$DE00`: low bits = bank, **bit 7 = switch the cartridge off** |
+| `/EXROM` (edge pin 9) | tied **low** |
+| `/GAME` (edge pin 8) | left high (not connected) |
+| Autostart | the `CBM80` signature at `$8004` is already in the image |
+
+The hardware is the EPROM plus a '273-style latch that decodes a write to `$DE00` (an Ultimate does
+this in software). At power-on the ROM stub copies a small mover routine to the tape buffer at
+`$033C`, and that routine copies the program from the banks into RAM and switches the cartridge
+off, so BASIC comes back and the program runs from ordinary RAM. The bank switching has to run
+from RAM: code that is itself executing inside the cartridge window would change under the CPU
+the moment the latch is written.
+
+Why 64K: the program image is about 33K, more than the four banks a 27C256 gives. Why Magic
+Desk at all: a plain 16K cartridge would replace BASIC at `$A000`, which the C64 needs to start
+the program.
+
 ### Keys
 
 | key | does |
