@@ -210,6 +210,13 @@ off, so BASIC comes back and the program runs from ordinary RAM. The bank switch
 from RAM: code that is itself executing inside the cartridge window would change under the CPU
 the moment the latch is written.
 
+**Status:** the `.crt` image is tested and works (VICE and a real Ultimate II+). Burning the `.bin` to a
+physical EPROM cartridge **has not been tried yet**.
+
+**Bank bits:** the eight banks need **three** bank bits from the latch, wired to the 27C512's A13, A14
+and A15. A board built for the earlier 32K image only drives two; if A15 is tied low, the C64 only ever
+sees the first 32K and the program will not start.
+
 Why 64K: the program image is about 33K, more than the four banks a 27C256 gives. Why Magic
 Desk at all: a plain 16K cartridge would replace BASIC at `$A000`, which the C64 needs to start
 the program.
