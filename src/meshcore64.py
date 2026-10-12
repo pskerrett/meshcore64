@@ -7781,34 +7781,34 @@ gdgo:   lda #63
         sta GEOPG
         lda #0
         sta GEOBK
-        lda GEOWIN+255
+        lda GEOWIN+253
         sta GORIG
         lda #165
-        sta GEOWIN+255
-        lda GEOWIN+255
+        sta GEOWIN+253
+        lda GEOWIN+253
         cmp #165
         bne gdno
         lda #90
-        sta GEOWIN+255
-        lda GEOWIN+255
+        sta GEOWIN+253
+        lda GEOWIN+253
         cmp #90
         bne gdno
 ; the page register has to select different memory, or this is just some
 ; RAM-like thing in I/O 1 and not a GeoRAM
         lda #62
         sta GEOPG
-        lda GEOWIN+255
+        lda GEOWIN+253
         sta GTMP
         lda #195
-        sta GEOWIN+255
+        sta GEOWIN+253
         lda #63
         sta GEOPG
-        lda GEOWIN+255
+        lda GEOWIN+253
         sta GTMP2
         lda #62
         sta GEOPG
         lda GTMP
-        sta GEOWIN+255
+        sta GEOWIN+253
         lda GTMP2
         cmp #90
         bne gdno
@@ -7820,19 +7820,19 @@ gdsz:   lda #63
         sta GEOPG
         lda GBLKS
         sta GEOBK
-        lda GEOWIN+255
+        lda GEOWIN+253
         sta GTMP
         lda #195
-        sta GEOWIN+255
+        sta GEOWIN+253
         lda #0
         sta GEOBK
-        lda GEOWIN+255
+        lda GEOWIN+253
         cmp #90
         bne gdwrap
         lda GBLKS
         sta GEOBK
         lda GTMP
-        sta GEOWIN+255
+        sta GEOWIN+253
         asl GBLKS
         bne gdsz
 gdwrap: lda #63
@@ -7840,7 +7840,7 @@ gdwrap: lda #63
         lda #0
         sta GEOBK
         lda GORIG
-        sta GEOWIN+255
+        sta GEOWIN+253
         lda GBLKS
         beq gdbig
         cmp #8                  ; under 128K is not worth having

@@ -182,9 +182,9 @@ that still works. MeshCore 64 reads the channels that are on the radio and can a
 | `meshcore64-ez-v2.0.1.crt` | **MeshCore 64 EZ**: the same program on an **EasyFlash** cartridge ([details](#meshcore-64-ez-easyflash)) |
 
 The cartridge copies the program into RAM and starts it, so after that it is the same program.
-Because a cartridge cannot safely probe the GeoRAM window, **the cartridge builds do not look for
-a GeoRAM**: with a GeoRAM or NeoRAM use the PRG or D64. An REU (including the Ultimate's) works
-with every format, and so does the Ultimate's clock.
+Every format is **the same program**: the PRG, the D64, both cartridge images and the EasyFlash image all
+carry identical bytes, and all of them look for an REU and for a GeoRAM or NeoRAM at start (tested in VICE: the
+PRG, D64 and Magic Desk cartridge detect both). The cartridge is only a different way to deliver it.
 
 ### Making a cartridge
 
@@ -241,7 +241,8 @@ program changed and it never writes to the flash.
 EasyFlash hardware or an Ultimate II+ yet**. VICE prints a harmless warning that it found no EasyAPI
 (the library other EasyFlash programs use to write flash); this cartridge never writes flash, so it
 does not carry one. A physical EasyFlash occupies the expansion port and has 256 bytes of its own RAM at
-`$DF00`, where an REU has its registers, so do not expect to use an REU or GeoRAM *with* a physical EasyFlash.
+`$DF00`, where an REU has its registers, so do not expect to use an REU or GeoRAM *with* a physical EasyFlash: its registers answer across the whole `$DExx` page,
+which is the GeoRAM window.
 
 ### Keys
 

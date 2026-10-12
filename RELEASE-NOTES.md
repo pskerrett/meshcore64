@@ -2,7 +2,9 @@
 
 **Fix:** F7 (jump to the next channel with new messages) left pieces of the previous prompt on the bottom
 row when it landed on a channel with no history ("Public> le>"). It now clears the screen first, as the channel
-picker does. Nothing else changed since v2.0; the radio firmware is the same.
+picker does. **Every format is now the same program.** The cartridge images used to skip the GeoRAM probe; they now detect a
+GeoRAM or NeoRAM (and an REU) exactly like the PRG and D64. The probe was changed to use a window address that
+is harmless to an EasyFlash cartridge. The radio firmware is the same.
 
 The C64 client for MeshCore, rewritten in machine language with its own 5760-baud RS-232 driver.
 

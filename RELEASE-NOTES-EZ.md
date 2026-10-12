@@ -2,7 +2,7 @@
 
 MeshCore 64 2.0.1 for **EasyFlash** cartridges: `meshcore64-ez-v2.0.1.crt` (CRT type 32).
 
-It is the same program, byte for byte, as the v2.0.1 cartridge build; only the cartridge wrapper differs.
+It is the same program, byte for byte, as the v2.0.1 PRG and cartridge images; only the cartridge wrapper differs.
 It does not write to the flash.
 
 - **Ultimate II+:** run the `.crt` from its menu.
