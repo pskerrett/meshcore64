@@ -179,6 +179,7 @@ that still works. MeshCore 64 reads the channels that are on the radio and can a
 | `meshcore64-v2.0.d64` | a disk image: `LOAD"MESHCORE64",8` then `RUN` |
 | `meshcore64-v2.0.crt` | a cartridge image (Magic Desk, 64K): runs the moment you switch on |
 | `meshcore64-v2.0.bin` | the same cartridge as a flat 64K image for a **27C512** EPROM |
+| `meshcore64-ez-v2.0.crt` | **MeshCore 64 EZ**: the same program on an **EasyFlash** cartridge ([details](#meshcore-64-ez-easyflash)) |
 
 The cartridge copies the program into RAM and starts it, so after that it is the same program.
 Because a cartridge cannot safely probe the GeoRAM window, **the cartridge builds do not look for
@@ -220,6 +221,27 @@ sees the first 32K and the program will not start.
 Why 64K: the program image is about 33K, more than the four banks a 27C256 gives. Why Magic
 Desk at all: a plain 16K cartridge would replace BASIC at `$A000`, which the C64 needs to start
 the program.
+
+### MeshCore 64 EZ (EasyFlash)
+
+**`meshcore64-ez-v2.0.crt`** is MeshCore 64 2.0 for an **EasyFlash** cartridge (CRT type 32), such as an
+EasyFlash 3, or for an Ultimate II+ running an EasyFlash cartridge image. It is the same program,
+byte for byte, as the cartridge build above; only the cartridge wrapper differs. Nothing in the
+program changed and it never writes to the flash.
+
+- **Ultimate II+:** run the `.crt` from its menu.
+- **EasyFlash 3:** write the `.crt` to the cartridge with EasyProg (or any tool that programs EasyFlash
+  `.crt` files). It uses ROML banks 0-4 for the program and ROMH bank 0 for the boot code, leaving the
+  rest of the 1 MB free.
+- **How it starts:** reset boots in Ultimax mode from ROMH bank 0, which switches to 8K mode and lets the
+  KERNAL autostart the stub in ROML bank 0. The stub copies the program into RAM, switches the cartridge
+  off, and runs it, exactly as the Magic Desk cartridge does. Details in [`src/mkcart_ez.py`](src/mkcart_ez.py).
+
+**Status:** tested in VICE only (NTSC and PAL, with and without an REU); it has **not been tried on real
+EasyFlash hardware or an Ultimate II+ yet**. VICE prints a harmless warning that it found no EasyAPI
+(the library other EasyFlash programs use to write flash); this cartridge never writes flash, so it
+does not carry one. A physical EasyFlash occupies the expansion port and has 256 bytes of its own RAM at
+`$DF00`, where an REU has its registers, so do not expect to use an REU or GeoRAM *with* a physical EasyFlash.
 
 ### Keys
 
