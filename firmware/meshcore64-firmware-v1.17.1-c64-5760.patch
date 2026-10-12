@@ -1,0 +1,223 @@
+diff --git a/examples/companion_radio/main.cpp b/examples/companion_radio/main.cpp
+index 89f0e6cb..8e240df2 100644
+--- a/examples/companion_radio/main.cpp
++++ b/examples/companion_radio/main.cpp
+@@ -61,7 +61,10 @@ MultiSerialInterface interface_manager;
+ #if defined(SERIAL_RX)
+   #include <helpers/ArduinoSerialInterface.h>
+   ArduinoSerialInterface hardware_serial_interface;
+-  HardwareSerial companion_serial(1);
++  #ifndef HW_SERIAL_UART_NUM
++    #define HW_SERIAL_UART_NUM 1
++  #endif
++  HardwareSerial companion_serial(HW_SERIAL_UART_NUM);
+ #endif
+ 
+ // platform file system
+@@ -113,6 +116,10 @@ void halt() {
+   unsigned long last_wifi_reconnect_attempt = 0;
+ #endif
+ 
++#ifndef HW_SERIAL_BAUD_RATE
++  #define HW_SERIAL_BAUD_RATE 115200
++#endif
++
+ void setup() {
+   Serial.begin(115200);
+   board.begin();
+@@ -224,8 +231,13 @@ void setup() {
+ 
+ // add hardware serial interface
+ #if defined(SERIAL_RX)
+-  companion_serial.setPins(SERIAL_RX, SERIAL_TX);
+-  companion_serial.begin(115200);
++  // pins passed directly to begin() (not via a separate setPins() call) --
++  // matches Meshtastic's own ESP32 SerialModule pattern
++  // (Serial2.begin(baud, SERIAL_8N1, rxd, txd)), which its firmware repo
++  // notes is what makes ESP32 correctly configure the pin GPIO direction/
++  // mode as part of enabling the UART, rather than relying on state left
++  // behind by an earlier setPins() call.
++  companion_serial.begin(HW_SERIAL_BAUD_RATE, SERIAL_8N1, SERIAL_RX, SERIAL_TX);
+   hardware_serial_interface.begin(companion_serial);
+   interface_manager.addInterface(InterfaceType::HardwareSerial, &hardware_serial_interface);
+ #endif
+diff --git a/examples/companion_radio/ui-new/UITask.cpp b/examples/companion_radio/ui-new/UITask.cpp
+index 051f3b31..2dbf36bb 100644
+--- a/examples/companion_radio/ui-new/UITask.cpp
++++ b/examples/companion_radio/ui-new/UITask.cpp
+@@ -34,14 +34,24 @@
+ class SplashScreen : public UIScreen {
+   UITask* _task;
+   unsigned long dismiss_after;
++#ifdef MC64_BUILD
++  char _version_info[21];   // meshcore64: "v1.17.1-c64-7200" must fit (21 = one OLED line)
++#else
+   char _version_info[12];
++#endif
+ 
+ public:
+   SplashScreen(UITask* task) : _task(task) {
+     // strip off dash and commit hash by changing dash to null terminator
+     // e.g: v1.2.3-abcdef -> v1.2.3
+     const char *ver = FIRMWARE_VERSION;
++#ifdef MC64_BUILD
++    // meshcore64: our version is "v1.17.1-c64" -- the suffix IS the point,
++    // so do not strip at the dash (upstream strips a commit hash there).
++    const char *dash = NULL;
++#else
+     const char *dash = strchr(ver, '-');
++#endif
+ 
+     int len = dash ? dash - ver : strlen(ver);
+     if (len >= sizeof(_version_info)) len = sizeof(_version_info) - 1;
+@@ -72,7 +82,14 @@ public:
+ 
+     display.setColor(UIColor::secondary_txt);
+     display.setTextSize(1);
++#ifdef MC64_BUILD
++    // meshcore64: which of our builds this is, so a flashed board can be
++    // identified without USB. Replaces the build date, which is the least
++    // useful line here when several of our variants are in circulation.
++    display.drawTextCentered(display.width()/2, 48, MC64_BUILD);
++#else
+     display.drawTextCentered(display.width()/2, 48, FIRMWARE_BUILD_DATE);
++#endif
+ 
+     return 1000;
+   }
+diff --git a/variants/heltec_v3/platformio.ini b/variants/heltec_v3/platformio.ini
+index 65e636eb..021913d0 100644
+--- a/variants/heltec_v3/platformio.ini
++++ b/variants/heltec_v3/platformio.ini
+@@ -145,6 +145,35 @@ build_flags =
+   -D MAX_GROUP_CHANNELS=40
+   -D DISPLAY_CLASS=SSD1306Display
+   -D ENABLE_USB_INTERFACE
++  -D SERIAL_RX=45
++  -D SERIAL_TX=46
++  -D HW_SERIAL_BAUD_RATE=600
++  -D HW_SERIAL_UART_NUM=2
++; NOTE: DO NOT ENABLE -->  -D MESH_PACKET_LOGGING=1
++; NOTE: DO NOT ENABLE -->  -D MESH_DEBUG=1
++build_src_filter = ${Heltec_lora32_v3.build_src_filter}
++  +<helpers/ui/SSD1306Display.cpp>
++  +<helpers/ui/MomentaryButton.cpp>
++  +<../examples/companion_radio/*.cpp>
++  +<../examples/companion_radio/ui-new/*.cpp>
++lib_deps =
++  ${Heltec_lora32_v3.lib_deps}
++  densaugeo/base64 @ ~1.4.0
++
++[env:Heltec_v3_companion_radio_usb_2400]
++extends = Heltec_lora32_v3
++build_flags =
++  ${Heltec_lora32_v3.build_flags}
++  -I examples/companion_radio/ui-new
++  -D MAX_CONTACTS=350
++  -D MAX_GROUP_CHANNELS=40
++  -D DISPLAY_CLASS=SSD1306Display
++  -D ENABLE_USB_INTERFACE
++  -D SERIAL_RX=45
++  -D SERIAL_TX=46
++  -D HW_SERIAL_BAUD_RATE=2400
++  -D MC64_BUILD='"mc64 usb 2400"'
++  -D HW_SERIAL_UART_NUM=2
+ ; NOTE: DO NOT ENABLE -->  -D MESH_PACKET_LOGGING=1
+ ; NOTE: DO NOT ENABLE -->  -D MESH_DEBUG=1
+ build_src_filter = ${Heltec_lora32_v3.build_src_filter}
+@@ -168,6 +197,95 @@ build_flags =
+   -D AUTO_SHUTDOWN_MILLIVOLTS=3400
+   -D BLE_DEBUG_LOGGING=1
+   -D OFFLINE_QUEUE_SIZE=256
++; --- meshcore64: the c64 link, alongside BLE ---
++; main.cpp's hardware-serial block is guarded by #if defined(SERIAL_RX),
++; so defining these is all it takes to bring the uart up in any companion
++; variant. On the ble build both interfaces coexist through
++; MultiSerialInterface, so a phone can stay connected over bluetooth while
++; the c64 is on the user port.
++  -D SERIAL_RX=45
++  -D SERIAL_TX=46
++  -D HW_SERIAL_BAUD_RATE=2400
++  -D HW_SERIAL_UART_NUM=2
++  -D MC64_BUILD='"mc64 ble 2400"'
++  -D FIRMWARE_VERSION='"v1.17.1-c64"'
++;  -D MESH_PACKET_LOGGING=1
++;  -D MESH_DEBUG=1
++build_src_filter = ${Heltec_lora32_v3.build_src_filter}
++  +<helpers/ui/SSD1306Display.cpp>
++  +<helpers/ui/MomentaryButton.cpp>
++  +<helpers/esp32/*.cpp>
++  +<../examples/companion_radio/*.cpp>
++  +<../examples/companion_radio/ui-new/*.cpp>
++lib_deps =
++  ${Heltec_lora32_v3.lib_deps}
++  densaugeo/base64 @ ~1.4.0
++
++[env:Heltec_v3_companion_radio_ble_7200]
++; meshcore64 7200-baud TEST firmware: same as the ble env above, link at 7200.
++; Pairs ONLY with the meshcore64 7200 test client (mlfast2.py, ctrl 15).
++extends = env:Heltec_v3_companion_radio_ble
++build_flags =
++  ${Heltec_lora32_v3.build_flags}
++  -I examples/companion_radio/ui-new
++  -D MAX_CONTACTS=350
++  -D MAX_GROUP_CHANNELS=40
++  -D DISPLAY_CLASS=SSD1306Display
++  -D BLE_PIN_CODE=123456   ; dynamic, random PIN
++  -D AUTO_SHUTDOWN_MILLIVOLTS=3400
++  -D BLE_DEBUG_LOGGING=1
++  -D OFFLINE_QUEUE_SIZE=256
++  -D SERIAL_RX=45
++  -D SERIAL_TX=46
++  -D HW_SERIAL_BAUD_RATE=7200
++  -D HW_SERIAL_UART_NUM=2
++  -D MC64_BUILD='"mc64 ble 7200"'
++  -D FIRMWARE_VERSION='"v1.17.1-c64-7200"'
++
++[env:Heltec_v3_companion_radio_ble_5760]
++; meshcore64 5760-baud TEST firmware: same as the ble env above, link at 5760.
++; Pairs ONLY with the meshcore64 5760 test client (mlreup.py, ctrl 13).
++extends = env:Heltec_v3_companion_radio_ble
++build_flags =
++  ${Heltec_lora32_v3.build_flags}
++  -I examples/companion_radio/ui-new
++  -D MAX_CONTACTS=350
++  -D MAX_GROUP_CHANNELS=40
++  -D DISPLAY_CLASS=SSD1306Display
++  -D BLE_PIN_CODE=123456   ; dynamic, random PIN
++  -D AUTO_SHUTDOWN_MILLIVOLTS=3400
++  -D BLE_DEBUG_LOGGING=1
++  -D OFFLINE_QUEUE_SIZE=256
++  -D SERIAL_RX=45
++  -D SERIAL_TX=46
++  -D HW_SERIAL_BAUD_RATE=5760
++  -D HW_SERIAL_UART_NUM=2
++  -D MC64_BUILD='"mc64 ble 5760"'
++  -D FIRMWARE_VERSION='"v1.17.1-c64-5760"'
++
++[env:Heltec_v3_companion_radio_ble_600]
++extends = Heltec_lora32_v3
++build_flags =
++  ${Heltec_lora32_v3.build_flags}
++  -I examples/companion_radio/ui-new
++  -D MAX_CONTACTS=350
++  -D MAX_GROUP_CHANNELS=40
++  -D DISPLAY_CLASS=SSD1306Display
++  -D BLE_PIN_CODE=123456   ; dynamic, random PIN
++  -D AUTO_SHUTDOWN_MILLIVOLTS=3400
++  -D BLE_DEBUG_LOGGING=1
++  -D OFFLINE_QUEUE_SIZE=256
++; --- meshcore64: the c64 link, alongside BLE ---
++; main.cpp's hardware-serial block is guarded by #if defined(SERIAL_RX),
++; so defining these is all it takes to bring the uart up in any companion
++; variant. On the ble build both interfaces coexist through
++; MultiSerialInterface, so a phone can stay connected over bluetooth while
++; the c64 is on the user port.
++  -D SERIAL_RX=45
++  -D SERIAL_TX=46
++  -D HW_SERIAL_BAUD_RATE=600
++  -D HW_SERIAL_UART_NUM=2
++  -D MC64_BUILD='"mc64 ble 600"'
+ ;  -D MESH_PACKET_LOGGING=1
+ ;  -D MESH_DEBUG=1
+ build_src_filter = ${Heltec_lora32_v3.build_src_filter}

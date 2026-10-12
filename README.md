@@ -1,303 +1,254 @@
 # MeshCore 64
 
-A Commodore 64 chat client for the MeshCore mesh network.
+**A Commodore 64 chat client for the [MeshCore](https://github.com/meshcore-dev/MeshCore) LoRa mesh.**
+Version 2.0. Machine language, 5760 baud, all of it running on a stock C64.
 
-> **Also available:** [**v2.01 beta**](https://github.com/pskerrett/meshcore64/tree/v2.0-beta)
-> — the client rewritten entirely in machine language with its own RS-232
-> driver, running at **2400 baud**. Emulator-tested only; this page is the
-> version proven on real hardware.
+<p align="center"><img src="docs/images/meshcore64-demo.gif" alt="MeshCore 64 in action" width="768"></p>
 
-A real C64 joins a LoRa mesh and sends and receives messages on it, using
-**bit-zeal's mesh modem cartridge** — the Heltec V3 (ESP32-S3) carrier that
-brings a LoRa radio onto the C64 user port. The C64 talks to the radio over
-that port at 600 baud.
+Plug a MeshCore radio into the user port and your C64 is a full mesh node's front end: read and send
+messages on channels, send direct messages, browse every node the radio has heard, log in to
+repeaters and pull telemetry, tune the radio, and keep months of history. It talks to the radio
+with its own interrupt-driven RS-232 driver, so there is no BASIC, no KERNAL serial code and no
+waiting around.
 
-```
-MeshCore 64   v1.2d
-radio fw: mc64 1.17.1
-connected as 59800697 on Public
-f1 channels   f7 public
-```
+It also makes good use of the extras a well-equipped C64 may have:
 
----
+| | add-on | what MeshCore 64 does with it |
+|---|---|---|
+| <img src="docs/images/addon-reu1750.jpg" width="170"> | **REU** (1700 / 1750 / 1764, or the Ultimate II+'s REU) | Message history for every channel, scrollback with F5, the node and channel lists cached, and the whole session **restored after a reset** |
+| <img src="docs/images/addon-neoram.jpg" width="90"> | **GeoRAM / NeoRAM** | Everything the REU does. A **NeoRAM has a battery**, so history, channel list and node lists survive a power-off too |
+| <img src="docs/images/addon-kawari.jpg" width="150"> | **VIC-II Kawari** | **80-column mode**: detected at start (with a short countdown you can cancel), every screen and menu in 80 columns, F3 swaps between 40 and 80 |
+| <img src="docs/images/addon-ultimate.jpg" width="170"> | **Ultimate II+** (real-time clock) | Reads the clock at start, learns your time zone from the mesh, and **sets the radio's clock** when it is behind. Stats shows the offset |
 
-## Credit
-
-This project stands entirely on
-[**bit-zeal**](https://www.bit-zeal.com/s/shop)'s work.
-
-The **mesh modem cartridge** is bit-zeal's hardware. It is what
-makes any of this possible. MeshCore 64 is written specifically for
-that cartridge and targets its wiring exactly.
-
-bit-zeal wrote the original Meshtastic client for the C64
-[**meshtastic64**](https://github.com/bit-zeal/meshtastic64-commodore-64).
-
-
-**MeshCore 64 is a port of that hardware over to MeshCore.
-It is the same cartridge, but a different mesh on the other end. If you
-run Meshtastic, use meshtastic64 — it is the mature, original client for
-this board. This exists for people who want to try MeshCore.
-
-This is an independent, unofficial port and is not affiliated with Jim_64. 
+None of them is required. Without any expansion memory you still get live chat, channels, nodes,
+direct messages and a rolling history in main RAM; the program checks for each add-on when it starts and tells you what it found.
+(Product photos are for illustration; the trademarks belong to their owners.)
 
 ---
 
-## What it does
+## A tour
 
-- **Chat on the mesh.** Type, press RETURN, it goes out over LoRa. Incoming
-  messages appear as they arrive.
-- **Channels.** `F1` lists the channels configured on your radio; pick one
-  with a digit and everything — display and sending — scopes to it. `F7`
-  jumps straight back to Public.
-- **Tells you what you're missing.** `Public +3>` means 3 messages are
-  waiting on other channels. Switch to one and they're replayed.
-- **Lights up the cartridge.** All six lamps sweep at startup, then a
-  ripple on every incoming message and a flash when you send.
-- **Scrolls back, with a RAM Expansion Unit.** `F5` pages back through
-  screens of history, `F7` pages forward, anything else returns to live.
-  The border turns red while you are looking at history. Without an REU
-  the client behaves exactly as it does otherwise, and `F5` is not
-  offered.
+### Start
 
-Not yet: contacts, direct messages, or repeater admin. Channels only.
+<img src="docs/images/01-splash.png" width="576"> <img src="docs/images/02-start.png" width="576">
 
----
+The splash, then a status screen that reports what it found: **video** (PAL or NTSC, detected),
+**memory** (REU, GeoRAM or none, with the size), the **clock** (an Ultimate's RTC, or "none: set
+from the mesh"), and the **display** (a Kawari gets "kawari detected, switching to 80 columns in
+3 seconds": press any key to stay in 40). Then it connects at 5760 baud, shows the radio's id and
+firmware, scans your channels and prints the mesh time next to the radio time, correcting the
+radio if it is behind. Restored history is painted back under the boot text.
 
-## What you need
+### Chat
 
-| | |
-|---|---|
-| A Commodore 64 | any model, real not emulated |
-| bit-zeal's mesh modem cartridge | the Heltec V3 / ESP32-S3 board that carries the LoRa radio onto the user port |
-| The firmware image | `meshcore64-1.17.1-0679dbef-merged.bin` |
-| The program | `meshcore64.prg`, `meshcore64.d64` (disk), or `meshcore64.crt` (cartridge) |
+<img src="docs/images/03-chat.png" width="576">
+
+Every sender gets a colour of their own, and it is the same colour every time, live or in
+history. A rule separates messages. The prompt shows the channel and, after the `+`, how many
+messages are waiting on other channels: `Public +15>`.
+
+What you type is **white** until it is sent. It turns **yellow** when the radio has taken it, and
+**green** when the mesh has proved it: an ack for a direct message, or a repeat you can hear for a
+channel message. Each further repeat flashes the name again, so you can watch a message spread:
+
+<img src="docs/images/14-heard.png" width="576">
+
+You can type up to 135 characters; long lines wrap cleanly.
+
+### Menus
+
+<img src="docs/images/04-menu.png" width="576"> <img src="docs/images/05-channels.png" width="576">
+
+**F1** opens the menu over the conversation: Channels, Nodes, Stats, Radio actions, Add/remove
+channel. The channel list shows unread counts and a star where you are. Pick with the digit keys
+or the cursor keys.
+
+### Nodes
+
+<img src="docs/images/06-companions.png" width="576"> <img src="docs/images/07-repeaters.png" width="576">
+
+**Nodes** lists what the radio has heard: companions, repeaters, room servers and sensors, with a
+count in the title. Names are shown in full. Press `/` and type to filter, `R` to refresh the list
+from the radio. Nodes announced while you are connected are added automatically (and saved, with
+an REU or GeoRAM).
+
+<img src="docs/images/08-search.png" width="576">
+
+### Talk to a node
+
+<img src="docs/images/09-node-actions.png" width="576"> <img src="docs/images/10-telemetry.png" width="576">
+
+Pick a node and you can **send it a message**, **log in** (repeaters and rooms ask for a password;
+a wrong one is reported), pull **telemetry** (battery voltage, temperatures: it tries a guest
+login first, so nodes without a password work), **show** its route, or **wipe** the route.
+Direct messages try the stored route first; if no ack arrives in about 13 seconds the route is
+reset and the message is sent again by flood ("no ack - resent by flood").
+
+<img src="docs/images/11-route.png" width="576">
+
+### Direct messages are channels too
+
+<img src="docs/images/12-direct-message.png" width="576"> <img src="docs/images/13-dm-in-channels.png" width="576">
+
+A direct-message conversation behaves exactly like a channel: it has its own history and unread
+count, and it **stays in the channel list** after the first message so you can come back to it. The
+conversations are saved with the session when you have an REU or GeoRAM.
+
+### F7: jump to new messages
+
+<img src="docs/images/15-f7.png" width="576">
+
+**F7** takes you to the next channel or conversation with unread messages. With nothing unread it
+just steps to the next channel, so you can cycle through them all.
+
+### History
+
+<img src="docs/images/16-scrollback.png" width="576">
+
+**F5** scrolls back through everything the REU or GeoRAM has kept (the border turns red while you
+are in history); F5 again goes further back, F7 comes forward, any other key returns to live.
+After a reset the history is still there: the start screen says "REU detected ... restored".
+
+### Stats
+
+<img src="docs/images/17-stats.png" width="576">
+
+Battery, storage and uptime from the radio; video standard; the **clock** (read live from an
+Ultimate's RTC) and the **offset** between it and the radio; messages in and out; **how long ago the last message
+was**; nodes known out of the maximum; the link speed and the receive-buffer peak; frames and
+errors; and how full the REU / GeoRAM history is.
+
+<img src="docs/images/hw-stats.jpg" width="576">
+
+*The same screen on a real PAL C64 with an Ultimate II+ and a 2 MB GeoRAM.*
+
+### Radio actions
+
+<img src="docs/images/18-radio-actions.png" width="576"> <img src="docs/images/19-purge.png" width="576">
+
+Frequency, bandwidth, spreading factor, coding rate and power; the node name; **Apply to node**;
+send an advert (zero hop or flood). And **Purge old nodes...**: type a number of days and the C64
+reads the radio's node list and removes every node it has not heard from in that long (favourites
+are always kept), then tells you how many it checked and removed. The radio keeps nodes
+forever until it is full, so this is how you keep the list tidy.
+
+### Add a channel
+
+<img src="docs/images/20-add-channel.png" width="576">
+
+**Add/remove channel** creates a channel from a name and a key. Leave the key blank for a
+`#hashtag` channel and the C64 works out the right key itself (SHA-256 of the name, in 6502).
 
 ---
 
 ## Getting started
 
-All of the setup happens with the Heltec board **out of the cartridge**.
-bit-zeal warns against connecting USB while it is seated in the cart, and
-steps 1–3 all need USB.
-
-**1. Get the firmware.** Either patch a current MeshCore
-`companion_radio_usb` build for the Heltec V3 yourself — see
-[Updating to a newer MeshCore release](#updating-to-a-newer-meshcore-release)
-below — or just use the prebuilt image here:
-
-```bash
-esptool.py --chip esp32s3 write_flash 0x0 meshcore64-1.17.1-0679dbef-merged.bin
-```
-
-Note this replaces Meshtastic on the board. To go back to meshtastic64,
-reflash the Meshtastic firmware; the hardware is unchanged either way.
-
-**2. Set up the companion over USB.** Connect to the board with any
-MeshCore client over USB and configure it as you would any companion node —
-region and frequency, node name, and whatever else your local MeshCore
-setup expects. The patched firmware keeps USB working alongside the
-600-baud user-port link, so this is exactly the normal MeshCore setup
-process.
-
-Get this right before moving on: if the radio isn't on your local
-frequency, the C64 will connect happily and simply never hear anything.
-
-**3. Set up your channels** in that same client. MeshCore 64 reads whatever
-is already on the radio — it doesn't create channels.
-
-**4. Seat the board in the cartridge**, plug the cart into the C64, and
-start the program. It connects on its own.
-
-Three ways to run it. Load `meshcore64.prg` the usual way; or put
-`meshcore64.d64` on a disk and `LOAD"MESHCORE64",8`; or put
-`meshcore64.crt` on a cartridge and it runs the moment you switch on — the
-mesh modem is on the user port, so the expansion port is free for it.
-
-### Building a cartridge
-
-The cartridge image is **Magic Desk** (`.crt` type 19) — a banked format,
-and the banking is not optional. The reason is a squeeze:
-
-- The program is about 12.5KB, so it **does not fit an 8K cart**.
-- The expansion port exposes only two 8K windows, `$8000` and `$A000`, and
-  `$A000` is where **BASIC ROM** lives. A 16K cart therefore *replaces*
-  BASIC — leaving nothing to run a BASIC program with. A bigger EPROM
-  doesn't help either: the C64 still only sees 8K at a time.
-
-Magic Desk fixes both with one latch at `$DE00`. Its low bits select an 8K
-bank; **bit 7 disables the cartridge outright**. So the cart copies bank 0
-into RAM, switches to bank 1, copies the rest, then banks *itself* out —
-BASIC reappears and `RUN`s the program, which from then on is an ordinary
-BASIC program in ordinary RAM.
+### What you need
 
 | | |
 |---|---|
-| ROM size | **32 KB** — a 27C256. Only the first two banks are used; the rest is `$FF` |
-| Maps at | `$8000`–`$9FFF`, one 8K bank at a time |
-| Bank register | write `$DE00` — low bits = bank, **bit 7 = disable cart** |
-| `/EXROM` (edge pin 9) | **tied low** |
-| `/GAME` (edge pin 8) | **left high** — not connected |
-| Autostart | via the `CBM80` signature at `$8004`, already in the image |
+| A **Commodore 64** | real hardware, PAL or NTSC |
+| A **MeshCore radio on the user port** | [bit-zeal's mesh modem cartridge](https://www.bit-zeal.com/s/shop): a Heltec WiFi LoRa 32 **V3** carried on a user-port board |
+| The radio **firmware** in [`firmware/`](firmware) | MeshCore 1.17.1 Bluetooth companion with the C64 link at **5760 baud** |
+| The **program** in [`release/`](release) | PRG, D64, CRT or BIN: pick one |
 
-Why 32K when only 16K is used: 32K is Magic Desk's **minimum**. VICE's own
-`cartconv` rejects 8K and 16K images for this type outright, so a 16K burn
-is not a valid Magic Desk cartridge even though 16K is all the data there
-is. Burn the full 32K.
+### 1. Flash the radio
 
-Hardware is an EPROM plus a '273-style latch decoding a write to `$DE00`.
-The 1541 Ultimate II+ and similar do it in software with no extra parts —
-and being software, they can supply the REU at the same time, so
-scrollback works from cartridge.
-
-Burn **`meshcore64.bin`** — one flat 32768-byte image, banks end to end,
-which is what an EPROM burner wants. `meshcore64.crt` is the same contents
-in the container emulators expect, so use that one for VICE. The padding is
-`$FF`, which is also erased-EPROM state, so it burns cleanly.
-
-*One trap if you build something like this yourself:* the code that writes
-`$DE00` cannot itself be running inside the cartridge window. The instant
-that write lands, the bytes under the program counter change — to program
-data on a bank switch, to empty RAM on the bank-out — and the CPU runs off
-into garbage with a blank screen and no other symptom. The cart's ROM stub
-therefore does one thing: copy a small mover routine into the tape buffer
-at `$033C` and jump to it. All the bank switching happens from there, in
-RAM, where the banks moving beneath `$8000` cannot reach it.
-
-### Building
-
-The source keeps every comment. The build strips them, and that is not
-cosmetic: with comments intact the program compiles to about 36KB, which
-leaves under 2.5KB for variables against the roughly 2.8KB the arrays
-need, and it fails with `?OUT OF MEMORY` while building a string.
-Stripped, it is about 10KB and leaves 28KB free.
-
-Compiling needs VS64's BASIC tokeniser, which is plain Python and does
-not need the editor:
+With the Heltec **out of the cartridge** (bit-zeal warns against connecting USB while it is
+seated), flash the merged image at address 0:
 
 ```bash
-git clone https://github.com/rolandshacks/vs64
-BC=/path/to/vs64/tools/bc.py ./build.sh
+esptool.py --chip esp32s3 write_flash 0x0 firmware/firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin
 ```
 
-`build.sh` passes **`-c`**, the tokeniser's own comment stripper, which is
-what keeps the build small enough to run:
+It identifies itself as **`v1.17.1-c64-5760`** on the OLED splash ("mc64 ble 5760" under it) and
+on the C64's boot screen. Then set the radio up as you would any MeshCore companion (region,
+frequency, name, channels) with the MeshCore phone app: it is the Bluetooth companion build, so
+that still works. MeshCore 64 reads the channels that are on the radio and can add more.
 
-```bash
-python3 bc.py -c -o meshcore64.prg meshcore64.bas
-```
+**The client and the firmware must run at the same speed.** If the C64 never gets past
+"connecting at 5760 baud...", the radio is not running this firmware.
 
-Drop the `-c` and you get a readable listing on the C64 — useful for
-poking around, but too large to run. Other flags worth knowing: `-m`
-writes a map file, which turns the line number in a `?ERROR IN nnn` back
-into a line of source.
+### 2. Run the program
 
----
-
-## How it works
-
-**The radio speaks binary.** MeshCore's companion protocol is framed
-binary — a marker byte, a length, then a payload — not the line-based text
-Meshtastic uses. Every frame is full of zero bytes, and C64 BASIC's `GET#`
-cannot return a zero byte: an empty string means both "nothing arrived" and
-"a real 0x00 arrived". So the client bypasses `GET#` and reads the KERNAL's
-serial buffer directly.
-
-**BASIC is too slow, so the serial engine is machine code.** At 600 baud a
-byte lands every 17ms, but `GET#` alone costs about 50ms — a 3× deficit no
-amount of BASIC tuning closes. A 113-byte 6502 routine at `$C000` drains
-the buffer and reassembles frames, so BASIC only ever sees whole messages.
-That single change took message latency from 3.4 seconds to 1.1, and kept
-it flat under load instead of drifting into minutes.
-
-**600 baud is the right rate — do not raise it.** Retested at 1.0, after
-the machine-code work made rendering 6.6× faster, in case the earlier
-failures had been the C64 failing to keep up. They were not:
-
-| baud | syncs | sends | text |
-|---|---|---|---|
-| **600** | **54** | **2** | **clean** |
-| 1200 | 32 | 0 | corrupted — `Public` rendered as `ubic`, wrong channel at the wrong index |
-| 2400 | 1 | 0 | no channels found at all |
-
-600 delivers *more* than 1200: corrupted frames cost retries and
-mis-parses, so doubling the wire speed made the link slower in messages
-actually delivered. The limit is the C64's KERNAL, which samples every
-RS-232 bit by hand inside an interrupt — its timing margin shrinks as the
-rate climbs until jitter starts mis-sampling. Going faster would mean
-replacing that receiver outright (UP9600-style, driving the CIA shift
-register), a far bigger job than anything here.
-
-Worth knowing if you ever measure this yourself: at 1200 every *aggregate*
-number looked healthy — clean handshake, full channel scan, queue drained
-to zero — while the characters inside the frames were wrong. Frame counts
-tell you a payload parsed, not that its bytes were right.
-
-**Anything per-character belongs in machine code.** BASIC costs 20-56ms
-*per character*, so converting a single 40-character message between ASCII
-and the C64's character set took 2.3 seconds. That work happens in the
-machine-code routine now, in about a millisecond. It is why messages
-render quickly, why switching channels no longer freezes, and why pressing
-RETURN sends immediately instead of pausing first.
-
-**Messages are filtered for display, never for delivery.** The radio holds
-one queue shared by every channel, so a message for a channel you aren't
-watching still has to be collected — it's just not shown. Skipping it would
-strand it and back the queue up. The same reason the channel list keeps
-reading from the radio while it's on screen.
-
----
-
-## Updating to a newer MeshCore release
-
-The firmware is stock MeshCore plus a small patch — four build settings and
-a few lines in one file — that points the companion serial link at the
-cartridge's wiring. Nothing else is modified, so it should keep applying
-cleanly as MeshCore moves on.
-
-```bash
-unzip meshcore64-patch.zip -d meshcore64-patch
-
-git clone https://github.com/meshcore-dev/MeshCore
-cd MeshCore
-../meshcore64-patch/apply-patch.sh .
-../meshcore64-patch/build-firmware.sh
-```
-
-`apply-patch.sh` is safe to re-run — it detects an already-patched tree,
-falls back to a 3-way merge if upstream code has shifted around it, and
-prints the handful of manual edits if it can't apply them itself.
-
-`build-firmware.sh` reads MeshCore's own version and names the output
-`meshcore64-<version>-<commit>.bin`, so the image always says which
-upstream release it came from.
-
-### What the patch changes, and why
-
-| Change | Why |
+| file | how |
 |---|---|
-| Use UART **2** | The shared code hardcodes UART 1, which on this board receives nothing at all regardless of pins or baud rate. This was the fix that made the link work. |
-| Separate baud rate | The cartridge link runs at 600; USB stays at 115200. The original code hardcoded one rate for both. |
-| Pins 45 (RX) / 46 (TX) | The cartridge's physical wiring. |
+| `meshcore64-v2.0.prg` | load it from anything: an Ultimate, SD2IEC, `LOAD"*",8,1` and `RUN` |
+| `meshcore64-v2.0.d64` | a disk image: `LOAD"MESHCORE64",8` then `RUN` |
+| `meshcore64-v2.0.crt` | a cartridge image (Magic Desk, 64K): runs the moment you switch on |
+| `meshcore64-v2.0.bin` | the same cartridge as a flat 64K image for a **27C512** EPROM |
 
-The version label is kept short (`mc64 1.17.1`) because the firmware's OLED
-splash screen truncates anything longer, and lengthening its buffer would
-mean patching code unrelated to serial I/O.
+The cartridge copies the program into RAM and starts it, so after that it is the same program.
+Because a cartridge cannot safely probe the GeoRAM window, **the cartridge builds do not look for
+a GeoRAM**: with a GeoRAM or NeoRAM use the PRG or D64. An REU (including the Ultimate's) works
+with every format, and so does the Ultimate's clock.
+
+### Keys
+
+| key | does |
+|---|---|
+| `RETURN` | send what you typed |
+| `DEL` | delete |
+| `F1` | menu (also: back out of any menu or list) |
+| `F3` | with a Kawari: swap 40 / 80 columns |
+| `F5` | scroll back (needs an REU or GeoRAM) |
+| `F7` | jump to the next channel with new messages; with none, cycle channels |
+| in a node list | `RETURN` pick, `/` filter, `R` refresh from the radio |
+| in the channel list | `0`-`9` or cursor keys, `RETURN`, `R` rescan the radio |
 
 ---
 
-## Known limits
+## About the link
 
-- **The link carries 60 bytes per second, total** — shared with everything
-  the radio reports, not just your messages. A short message is about a
-  second on an idle mesh, longer on a busy one.
-- **The radio is chatty.** It reports *every* LoRa packet it overhears,
-  whether or not it's addressed to you, and on a 600-baud link that's the
-  main reason a busy mesh feels slow. 
-- **Scrollback needs an REU.** With a RAM Expansion Unit, every message is
-  archived per channel and `F5` pages back through it. Without one,
-  switching channels still replays what you missed, but earlier history
-  isn't kept and `F5` is not offered.
-- **Channel slots can have gaps.** The channel list normally stops scanning
-  after a few empty slots, which is fast but misses a channel sitting above
-  a gap. Press `r` in the list to sweep all 40 (about 40 seconds).
+The radio's second UART (GPIO45 RX / GPIO46 TX) is wired to the user port. The KERNAL's RS-232
+cannot be trusted much beyond 600 baud (it samples every bit by hand inside an interrupt), so
+MeshCore 64 has its **own driver**: timer-driven transmit, and a receiver that arms itself on the
+start bit, samples each bit near its centre, and ignores interrupt sources it did not enable (the
+CIA latches them regardless of the mask, which is what defeated the first attempts on real
+hardware). It runs at **5760 baud**, which leaves about 60 cycles of margin per bit with the screen
+on, in both PAL and NTSC. 7200 had no margin left: it dropped the odd character.
+
+The firmware is stock MeshCore 1.17.1 plus [a small patch](firmware/meshcore64-firmware-v1.17.1-c64-5760.patch)
+that selects UART 2, the pins and the baud rate for the companion link and lengthens the OLED version
+string. The wire protocol is documented in [docs/serial-protocol.md](docs/serial-protocol.md); the
+engineering notes behind the driver are in [docs/engineering](docs/engineering).
+
+## Building
+
+Everything is built by Python scripts; there are no other dependencies than VICE's `cartconv` and
+`c1541` for the cartridge and disk images.
+
+```bash
+src/build.sh            # -> release/meshcore64-v2.0.{prg,crt,bin,d64}; byte-identical to the published files
+pip install py65
+src/tests/run-sims.sh   # the 6502 simulator suites
+```
+
+[`src/tests/fakeradio.py`](src/tests/fakeradio.py) is a MeshCore radio simulator for VICE (set
+`-rsuserdev 0 -rsdev1 127.0.0.1:25232`); [`src/tests/run-vice.sh`](src/tests/run-vice.sh) shows how the
+screenshots above were made. The program is a single readable file, [`src/meshcore64.py`](src/meshcore64.py),
+with its own assembler; it is laid out in five code areas that fit the C64's 64K around the buffers.
+
+## Tested
+
+- Real hardware: an NTSC and a PAL C64 with the mesh modem cartridge, an Ultimate II+ (REU, clock) and a 2 MB GeoRAM/NeoRAM.
+- VICE (NTSC and PAL): boot of every format, and long runs with several hundred messages, adverts and
+  repeats on no expansion, an REU and a GeoRAM, with a scripted radio. No crashes, and the link error counter
+  stays at 0-2 per run.
+- 6502 simulators for the receiver timing, the menus, 80-column reflow, routes, F7, the purge, the stats.
+
+Known limits: the 80-column mode needs a Kawari whose firmware has its 80-column mode (the same one Novaterm's
+80-column driver uses). A message at the full 135 characters may be refused by the radio; the client
+then says "the radio refused that message". The radio keeps at most 350 nodes; the C64 holds up to 160
+(96 without expansion memory), so purge old nodes now and then.
+
+## Credits
+
+This stands on [**bit-zeal**](https://www.bit-zeal.com/s/shop)'s work: the **mesh modem cartridge** is
+their hardware, MeshCore 64 targets its wiring exactly, and their
+[meshtastic64](https://github.com/bit-zeal/meshtastic64-commodore-64) is the original client for the
+board (if you run Meshtastic, use that). This is an independent, unofficial port for
+[MeshCore](https://github.com/meshcore-dev/MeshCore). Thanks to the VICE team, the VIC-II Kawari
+project, and Gideon Zweijtzer's Ultimate II+.
+
+(c) 2026 -W9PDS
