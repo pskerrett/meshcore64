@@ -15,7 +15,8 @@ def check(n, c, extra=""):
 def A(l): return syms[l] if l in syms else E[l]
 def new():
     m = B.M(mm, code, syms, prg)
-    m.mem[A("setchan")] = 0x60                      # F7 ends in setchan; the test reads CC
+    m.mem[A("setchan")] = 0x60
+    m.mem[0xFFD2] = 0x60                            # CHROUT: just return                      # F7 ends in setchan; the test reads CC
     for i in range(48): m.mem[A("CUNR") + i] = 0
     for i in range(8): m.mem[A("DMUSE") + i] = 0
     m.mem[A("DMMK")] = 0xD7
@@ -106,4 +107,18 @@ m.mem[t:t + 3] = [0x20, A("pnrec") & 255, A("pnrec") >> 8]
 c = MPU(memory=m.mem); c.pc, c.sp = t, 0xFF
 for _ in range(400): c.step()
 check("sending stamps Last msg", m.mem[A("LRXOK")] == 1)
+# the screen is cleared before the channel is switched (the F7 debris fix)
+m = new(); name(m, 0); name(m, 1)
+m.mem[0xFFD2] = 0x60
+t = 0x0300
+m.mem[t:t + 3] = [0x20, A("f7next") & 255, A("f7next") >> 8]
+m.mem[A("CC")] = 0
+c = MPU(memory=m.mem); c.pc, c.sp = t, 0xFF
+seq = []
+for _ in range(5000):
+    if c.pc == t + 3: break
+    if c.pc == 0xFFD2: seq.append(("chrout", c.a))
+    if c.pc == A("setchan"): seq.append(("setchan", None))
+    c.step()
+check("F7 clears the screen, then switches", seq == [("chrout", 147), ("setchan", None)], seq)
 print("FAILURES:", bad); sys.exit(1 if bad else 0)

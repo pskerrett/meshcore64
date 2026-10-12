@@ -6449,7 +6449,7 @@ pyastart: .byte 1,0,0,0,0,0,0,0,67,54,52
 pyquery:  .byte 22,3
 pychan:   .byte 31,0
 pytime:   .byte 5
-banner: .text "meshcore 64  v2.0"
+banner: .text "meshcore 64  v2.0.1"
         .byte 13,0
 svideo: .text "video    "
         .byte 0
@@ -9869,6 +9869,8 @@ f7next: lda #0
         jsr f7nx
         bcc f7rt
 f7go:   stx CC
+        lda #147                ; clear first, as the channel picker does
+        jsr CHROUT
         jmp setchan
 f7rt:   rts
 ; A = 0 unread only, 1 any listed. Carry set and X = the slot found.

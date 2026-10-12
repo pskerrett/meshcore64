@@ -1,7 +1,7 @@
 # MeshCore 64
 
 **A Commodore 64 chat client for the [MeshCore](https://github.com/meshcore-dev/MeshCore) LoRa mesh.**
-Version 2.0. Machine language, 5760 baud, all of it running on a stock C64.
+Version 2.0.1. Machine language, 5760 baud, all of it running on a stock C64.
 
 <p align="center"><img src="docs/images/meshcore64-demo.gif" alt="MeshCore 64 in action" width="768"></p>
 
@@ -175,11 +175,11 @@ that still works. MeshCore 64 reads the channels that are on the radio and can a
 
 | file | how |
 |---|---|
-| `meshcore64-v2.0.prg` | load it from anything: an Ultimate, SD2IEC, `LOAD"*",8,1` and `RUN` |
-| `meshcore64-v2.0.d64` | a disk image: `LOAD"MESHCORE64",8` then `RUN` |
-| `meshcore64-v2.0.crt` | a cartridge image (Magic Desk, 64K): runs the moment you switch on |
-| `meshcore64-v2.0.bin` | the same cartridge as a flat 64K image for a **27C512** EPROM |
-| `meshcore64-ez-v2.0.crt` | **MeshCore 64 EZ**: the same program on an **EasyFlash** cartridge ([details](#meshcore-64-ez-easyflash)) |
+| `meshcore64-v2.0.1.prg` | load it from anything: an Ultimate, SD2IEC, `LOAD"*",8,1` and `RUN` |
+| `meshcore64-v2.0.1.d64` | a disk image: `LOAD"MESHCORE64",8` then `RUN` |
+| `meshcore64-v2.0.1.crt` | a cartridge image (Magic Desk, 64K): runs the moment you switch on |
+| `meshcore64-v2.0.1.bin` | the same cartridge as a flat 64K image for a **27C512** EPROM |
+| `meshcore64-ez-v2.0.1.crt` | **MeshCore 64 EZ**: the same program on an **EasyFlash** cartridge ([details](#meshcore-64-ez-easyflash)) |
 
 The cartridge copies the program into RAM and starts it, so after that it is the same program.
 Because a cartridge cannot safely probe the GeoRAM window, **the cartridge builds do not look for
@@ -188,12 +188,12 @@ with every format, and so does the Ultimate's clock.
 
 ### Making a cartridge
 
-**Ultimate II+ and similar:** copy `meshcore64-v2.0.crt` to the device and run it. Nothing to build.
+**Ultimate II+ and similar:** copy `meshcore64-v2.0.1.crt` to the device and run it. Nothing to build.
 
-**Your own EPROM cartridge:** burn `meshcore64-v2.0.bin` to a **27C512** (64K). It is one flat image,
+**Your own EPROM cartridge:** burn `meshcore64-v2.0.1.bin` to a **27C512** (64K). It is one flat image,
 the eight 8K banks end to end, and the unused tail is `$FF` (erased state). The `.crt` is the same
 contents in the container emulators expect: it is **Magic Desk** (cartridge type 19), so VICE
-runs it too (`x64sc -cartcrt meshcore64-v2.0.crt`).
+runs it too (`x64sc -cartcrt meshcore64-v2.0.1.crt`).
 
 | | |
 |---|---|
@@ -224,7 +224,7 @@ the program.
 
 ### MeshCore 64 EZ (EasyFlash)
 
-**`meshcore64-ez-v2.0.crt`** is MeshCore 64 2.0 for an **EasyFlash** cartridge (CRT type 32), such as an
+**`meshcore64-ez-v2.0.1.crt`** is MeshCore 64 2.0.1 for an **EasyFlash** cartridge (CRT type 32), such as an
 EasyFlash 3, or for an Ultimate II+ running an EasyFlash cartridge image. It is the same program,
 byte for byte, as the cartridge build above; only the cartridge wrapper differs. Nothing in the
 program changed and it never writes to the flash.
@@ -279,7 +279,7 @@ Everything is built by Python scripts; there are no other dependencies than VICE
 `c1541` for the cartridge and disk images.
 
 ```bash
-src/build.sh            # -> release/meshcore64-v2.0.{prg,crt,bin,d64}; byte-identical to the published files
+src/build.sh            # -> release/meshcore64-v2.0.1.{prg,crt,bin,d64}; byte-identical to the published files
 pip install py65
 src/tests/run-sims.sh   # the 6502 simulator suites
 ```

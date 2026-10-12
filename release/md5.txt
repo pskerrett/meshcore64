@@ -1,5 +1,5 @@
-b6b33f0e99f984101716bda9203b58be  meshcore64-v2.0.prg
-1474122ff8615870b500e60d8bca5839  meshcore64-ez-v2.0.crt
-2123b0b23057c5b39478a0c178b2c2fa  meshcore64-v2.0.crt
-0e9b5cf517a9e3331777f30efc7cef68  meshcore64-v2.0.bin
-1fc43b4836aa921993790a5e0961dbc8  meshcore64-v2.0.d64
+d670d34d71fc27d46f4770aa7eda6ecd  meshcore64-v2.0.1.prg
+cfe1ea5944eced4037de35033eaaa0bd  meshcore64-ez-v2.0.1.crt
+b97922eda62aabe0d3ac679a8b8eb955  meshcore64-v2.0.1.crt
+3d992cadacf69319ba638606a0b9aab8  meshcore64-v2.0.1.bin
+814e916bedc76b0396423ed6d532ed7a  meshcore64-v2.0.1.d64

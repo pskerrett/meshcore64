@@ -1,10 +1,14 @@
-# MeshCore 64 v2.0
+# MeshCore 64 v2.0.1
+
+**Fix:** F7 (jump to the next channel with new messages) left pieces of the previous prompt on the bottom
+row when it landed on a channel with no history ("Public> le>"). It now clears the screen first, as the channel
+picker does. Nothing else changed since v2.0; the radio firmware is the same.
 
 The C64 client for MeshCore, rewritten in machine language with its own 5760-baud RS-232 driver.
 
 **Assets** (all four program formats, plus the radio firmware that must go with them):
 
-- `meshcore64-v2.0.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
+- `meshcore64-v2.0.1.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
 - `firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin` (flash at 0x0), `...-app.bin`, and the source patch
 
 **Highlights**
