@@ -155,11 +155,13 @@ forever until it is full, so this is how you keep the list tidy.
 ### 1. Flash the radio
 
 With the Heltec **out of the cartridge** (bit-zeal warns against connecting USB while it is
-seated), flash the merged image at address 0:
+seated), connect it to your computer by USB and flash it with the **MeshCore web flasher** in Chrome:
 
-```bash
-esptool.py --chip esp32s3 write_flash 0x0 firmware/firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin
-```
+1. Download `firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin` from the
+   [latest release](https://github.com/pskerrett/meshcore64/releases/latest).
+2. Open <https://flasher.meshcore.io> in Chrome (or Edge).
+3. Choose **Custom firmware**, then pick the `.bin` you just downloaded.
+4. Select the board's serial port and flash.
 
 It identifies itself as **`v1.17.1-c64-5760`** on the OLED splash ("mc64 ble 5760" under it) and
 on the C64's boot screen. Then set the radio up as you would any MeshCore companion (region,

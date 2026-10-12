@@ -11,9 +11,9 @@ with it: both ends must run the same speed.
 | `meshcore64-firmware-v1.17.1-c64-5760.patch` | the source change against MeshCore 1.17.1 (PlatformIO env `Heltec_v3_companion_radio_ble_5760`) |
 | `md5.txt` | checksums |
 
-```bash
-esptool.py --chip esp32s3 write_flash 0x0 firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin
-```
+Flash it with the MeshCore web flasher in Chrome: open <https://flasher.meshcore.io>, choose
+**Custom firmware**, and pick the merged `.bin` you downloaded. (Command line, if you prefer:
+`esptool.py --chip esp32s3 write_flash 0x0 <merged.bin>`.)
 
 Flash with the board out of the cartridge. This replaces whatever was on the board (Meshtastic
 included); the hardware is unchanged. The firmware identifies itself as **`v1.17.1-c64-5760`**
