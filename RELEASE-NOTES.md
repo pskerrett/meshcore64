@@ -1,16 +1,25 @@
-# MeshCore 64 v2.0.1
+# MeshCore 64 v2.0.2
 
-**Fix:** F7 (jump to the next channel with new messages) left pieces of the previous prompt on the bottom
-row when it landed on a channel with no history ("Public> le>"). It now clears the screen first, as the channel
-picker does. **Every format is now the same program.** The cartridge images used to skip the GeoRAM probe; they now detect a
-GeoRAM or NeoRAM (and an REU) exactly like the PRG and D64. The probe was changed to use a window address that
-is harmless to an EasyFlash cartridge. The radio firmware is the same.
+**More nodes, and the lists no longer reload.**
+
+- With an REU or GeoRAM/NeoRAM the C64 now holds **255 nodes** (96 without expansion memory; it was 160 / 96).
+  The extra room is RAM that sat idle.
+- When the table is full the **newest nodes are kept**: every node remembers when it was last heard, and a
+  newer one replaces the oldest instead of being dropped. The list title says "newest" then, e.g. "Companions (85) newest".
+- Node lists are always marked as loaded, so a full table never forces a reload. After a restart with an REU or
+  GeoRAM the saved node table is used as it is; otherwise **all node types load in the background** a few seconds
+  after start (one pass instead of one per list). R in a list still refreshes it.
+- A list shows at most 128 rows; node names are kept to 23 characters.
+- F7 is labelled "channels".
+- **First start after the update:** the node format changed, so a node table saved by an older version is dropped once and
+  reloaded. Channel history is kept.
+- Every format is still the same program. The radio firmware is unchanged (5760 baud).
 
 The C64 client for MeshCore, rewritten in machine language with its own 5760-baud RS-232 driver.
 
 **Assets** (all four program formats, plus the radio firmware that must go with them):
 
-- `meshcore64-v2.0.1.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
+- `meshcore64-v2.0.2.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
 - `firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin` (flash at 0x0), `...-app.bin`, and the source patch
 
 **Highlights**

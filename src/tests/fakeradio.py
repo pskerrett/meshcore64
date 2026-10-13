@@ -333,7 +333,10 @@ class Radio:
                     f.append(len(hops))
                     f += hops + bytes(64 - len(hops))
                 f += nm + bytes(32 - len(nm))     # name
-                if ages:
+                if os.environ.get("MC64_TS"):          # last heard: node n is (total - n) * 20 minutes old
+                    t_adv = now_t - (len(contacts) - n) * 1200
+                    f += struct.pack("<I", t_adv) + struct.pack("<I", 0) * 2 + struct.pack("<I", t_adv)
+                elif ages:
                     old = n % 3 == 0
                     t_adv = now_t - (90 if old else 1) * 86400
                     t_mod = now_t - (90 if old and n % 9 != 0 else 1) * 86400   # every 3rd old one was touched lately
@@ -485,6 +488,8 @@ def main():
         r.queue.append(dm_msg(b"backlog DM from alice", 1))
         for i in ("backlog B", "backlog C"):
             r.queue.append(chan_msg(b"bob: " + i.encode(), 0))
+    for _i in range(int(os.environ.get("MC64_BACKLOG", "0"))):     # a burst already queued at connect
+        r.queue.append(chan_msg(b"dave: queued message number %d" % _i, _i % 3))
     conn.settimeout(0.2)
     start = time.time()
     next_msg = start + 15.0

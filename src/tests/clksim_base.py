@@ -26,7 +26,7 @@ class M:
         if hasattr(mod, "S4ORG"):        # segment 4: as main copies it after the splash
             tail4 = prg[2 + (mod.S4IMG - mod.ORG):]
             if hasattr(mod, "SEG5"):     # the last 512 bytes are segment 5's pages
-                tail4 = tail4[:-512]
+                tail4 = tail4[:-(getattr(mod, 'S5IMGEND', getattr(mod, 'S5MAX', 0x9B00)) - 0x9900)]
             for i, b in enumerate(tail4):
                 self.mem[mod.S4ORG + i] = b
         if getattr(mod, "SEG5", b""):    # segment 5, as main copies it to $9960

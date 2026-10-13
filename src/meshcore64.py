@@ -224,8 +224,8 @@ EQU = {
     # RAM is idle), 32 without (where it competes with the archive).
     "CONTACTS": 0x8000,
     "MAXCON":  0xCFF4,
-    "NODETAB": 0x9B00,   # name pointers for the VISIBLE nodes, up to 255 x 2
-    "NODEIX":  0x9D00,   # contact slot of each visible node, up to 255
+    "NODETAB": 0x9CC0,   # name pointers for the VISIBLE nodes, up to 255 x 2
+    "NODEIX":  0x9DC0,   # contact slot of each visible node, up to 255
     "NDOFF":   0xCFF5,   # first visible entry, for scrolling
     "SMC":     0xCFF6,   # index of the colon that ends the sender name
     "SMH":     0xCFF7,   # name hash, picks the sender colour
@@ -240,7 +240,7 @@ EQU = {
     # Ten rendered lines, 32 bytes each. It was eight at $c900 and full;
     # the radio panel needs ten once the two advert lines are in it.
     "LOGODAT": 0x6800,   # s14: splash RLE data, loaded here, read once
-    "PLBUF":   0x9E00,
+    "PLBUF":   0x9E40,
     "TSTR":    0x9FC0,   # s14: a time line being built, 40 bytes
     "PLTAB":   0xC840,   # pointer table -- must NOT sit inside PLBUF
     "PLBASE":  0xCFF0,   # which buffer plnew fills (2 bytes)
@@ -369,7 +369,7 @@ s4cp:   lda (PTR),y
         bne s4cp
         lda #$99                ; segment 5: image -> $9960..$9AFF
         sta PTR2H
-        ldx #2
+        ldx #4
         ldy #$60
 s5cp:   lda (PTR),y
         sta (PTR2),y
@@ -456,6 +456,7 @@ loop:   jsr poll
         jsr tkey
         jsr chktik
         jsr ctsave
+        jsr bgtick              ; node lists in the background
         jsr flrest
         jsr dmwd                ; DM: no ack by direct route -> flood
         lda READY
@@ -1561,6 +1562,10 @@ dispat: jsr clkhook             ; message timestamps can set the clock
         beq dchan
         cmp #3                  ; RESP_CODE_CONTACT
         beq dcont
+        cmp #4                  ; END_OF_CONTACTS
+        bne dsn4
+        jmp bgend
+dsn4:   lda BUF
         cmp #13                 ; RESP_CODE_DEVICE_INFO
         beq dinfo
         cmp #5                  ; RESP_CODE_SELF_INFO
@@ -2080,6 +2085,49 @@ CKL:    .byte 0,0
 CKTH:   .byte 0,0
 CKMS:   .byte 0,0
 CKBOOT: .byte 0
+; the record is written: its time, and count it if it was appended
+rxfin:  jsr rxts
+        ldy #24
+        lda RXT
+        sta (PTR),y
+        iny
+        lda RXT+1
+        sta (PTR),y
+        lda RXSL
+        cmp NCONT
+        bcc rxf9                ; replaced an old one
+        inc NCONT
+rxf9:   rts
+RXSL:   .byte 0
+RXI:    .byte 0
+RXC:    .byte 0
+RXT:    .byte 0,0
+RXCT:   .byte 0,0
+sndnew: .text " newest"
+        .byte 0
+; the second block of the node table: slots 160 and up live at $8000. carry set = none
+gk2:    lda NCONT
+        sec
+        sbc #160
+        bcc gk2n
+        beq gk2n
+        sta GLENL
+        lda #0
+        sta GLENH
+        ldx #6
+gk2l:   asl GLENL
+        rol GLENH
+        dex
+        bne gk2l
+        lda #0
+        sta PTR
+        lda #128
+        sta PTRH
+        clc
+        rts
+gk2n:   sec
+        rts
+
 lrxset: pha                     ; (pnrec still needs its A)
         sei
         lda $A2
@@ -2115,7 +2163,9 @@ LRXOK:  .byte 0
 ; the list has ended -- the C64 cannot listen while it sends -- removes each
 ; with CMD_REMOVE_CONTACT. The keys are kept in the C64's node table, which
 ; is emptied for it: every list is fetched again the next time it opens.
-purge4: lda #<tpgq
+purge4: jsr bgguard
+        bcs pgx
+        lda #<tpgq
         sta MNTIT
         lda #>tpgq
         sta MNTITH
@@ -2304,9 +2354,6 @@ dnadv:  lda SCBUSY
         beq cfrt
         jsr ckfind
         bcc cfrt
-        lda NCONT
-        cmp MAXCON
-        bcs cfrt
         lda NTYPE
         pha
         lda BUF+33
@@ -3020,6 +3067,17 @@ ndh4:   tya
         lda #41                 ; )
         sta NTBUF,x
         inx
+        lda NCONT
+        cmp MAXCON
+        bcc ndsf9               ; a full table: the oldest nodes were dropped
+        ldy #0
+ndsf1:  lda sndnew,y
+        beq ndsf9
+        sta NTBUF,x
+        inx
+        iny
+        bne ndsf1
+ndsf9:
         lda #32
         sta NTBUF,x
         inx
@@ -3042,7 +3100,7 @@ ndg1:   ora #48
 ndg2:   rts
 NDV:    .byte 0
 NDZ:    .byte 0
-NTBUF:  .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+NTBUF:  .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 tlogbad: .text "login refused - check the password"
         .byte 0
 CLKM:   .byte 0,0,0,0           ; this message's time
@@ -6449,7 +6507,7 @@ pyastart: .byte 1,0,0,0,0,0,0,0,67,54,52
 pyquery:  .byte 22,3
 pychan:   .byte 31,0
 pytime:   .byte 5
-banner: .text "meshcore 64  v2.0.1"
+banner: .text "meshcore 64  v2.0.2"
         .byte 13,0
 svideo: .text "video    "
         .byte 0
@@ -6634,7 +6692,7 @@ s2init: lda RU
         beq s2i1
         lda #64                 ; $4000
         sta CBASEH
-        lda #160                ; to $6800, where segment 4 starts
+        lda #255                ; 160 at $4000.. and 95 at $8000.. (contptr)
         sta MAXCON
         rts
 s2i1:   lda #128                ; $8000
@@ -7011,11 +7069,14 @@ nodelst:
         jmp mmshut
 ; menu() clears UIMODE on its way out. Put it back, or every message that
 ; arrives while the list is up prints straight over it.
+ntbg:   jmp mmshut
 ntsel:  ldx #1
         stx UIMODE
         clc
         adc #1                  ; ADV_TYPE_CHAT=1 REPEATER=2 ROOM=3 SENSOR=4
         sta NTYPE
+        jsr bgguard
+        bcs ntbg
         tax
         lda TLOAD,x
         beq ndfetch
@@ -7092,37 +7153,14 @@ ndfnx:  lda #0
 ; RESP_CODE_CONTACTS_START carries the radio's TOTAL, all types. If that
 ; many could not sit alongside what is cached, drop the cache now so this
 ; type gets the whole table.
-ndfst:  lda BUF+2
-        ora BUF+3
-        ora BUF+4
-        bne ndfclr
-        lda BUF+1
-        clc
-        adc NCONT
-        bcs ndfclr
-        cmp MAXCON
-        bcc ndfnx
-        beq ndfnx
-ndfclr: lda #0
-        sta NCONT
-        ldx #4
-ndfcl2: sta TLOAD,x
-        dex
-        bpl ndfcl2
-        jmp ndfnx
+ndfst:  jmp ndfnx               ; (the total is not used: see ndevict)
 ndfc:   inc NSEEN
         bne ndfc1
         inc NSEENH              ; a radio can hold 350
 ndfc1:  lda BUF+33
         cmp NTYPE
         bne ndfsk               ; another type: not kept
-        lda NCONT
-        cmp MAXCON
-        bcc ndfc2
-        lda #1                  ; no room: count it, but this list is not
-        sta NTRUNC              ; complete and must not be kept
-        bne ndfc3
-ndfc2:  jsr rxcont
+ndfc2:  jsr rxcont               ; (a full table keeps the newest)
 ndfc3:  inc NRECV
 ndfsk:  jsr ndline              ; every frame, so a run of other types
         jmp ndfnx               ; still visibly moves the count
@@ -7136,7 +7174,10 @@ ndferr: lda #1                  ; e.g. ERR_CODE_BAD_STATE: the radio's
         sta NTRUNC              ; iterator was already busy
 ndfeok: lda #0
         sta READY
-ndfend: jsr gsvk                ; node list -> GeoRAM
+ndfend: ldx NTYPE
+        lda #1
+        sta TLOAD,x             ; BEFORE the save, so the saved session says "loaded"
+        jsr gsvk                ; node list -> GeoRAM
         lda #0
         sta SCBUSY
         sta S2KEY
@@ -7148,10 +7189,7 @@ ndfend: jsr gsvk                ; node list -> GeoRAM
 ; **Kept even when incomplete.** It used to be thrown away, so a list that
 ; stalled, overflowed or was stopped was fetched again -- for minutes -- on
 ; every visit. Now it stays until r.
-ndfe2:  ldx NTYPE
-        lda #1
-        sta TLOAD,x
-        jmp ndview
+ndfe2:  jmp ndview
 
 ; "checked 40  kept 12: alice"
 ndline: jsr s2up
@@ -7274,6 +7312,8 @@ ndvl:   lda NIDX
         jsr nfmatch             ; counts it; carry set = filtered out
         bcs ndvn
         ldx NVIS
+        cpx #128
+        bcs ndvn
         lda NIDX
         sta NODEIX,x
         ldy #0
@@ -8070,6 +8110,10 @@ gsk1:   lda PTR
         lda #0
         sta GDIR
         jsr gcopy
+        jsr gk2
+        bcs gkn1
+        jsr gcopy
+gkn1:
         pla
         sta PTRH
         pla
@@ -8083,8 +8127,11 @@ gkset:  lda #0
         sta PTRH
         lda #1
         sta GBLK
-        lda NCONT               ; x64
-        sta GLENL
+        lda NCONT               ; x64 (the first block: 160 slots at most)
+        cmp #160
+        bcc gkc
+        lda #160
+gkc:    sta GLENL
         lda #0
         sta GLENH
         ldx #6
@@ -8175,6 +8222,10 @@ grsu:   lda GEOWIN+128,x
         lda #1
         sta GDIR
         jsr gcopy
+        jsr gk2
+        bcs gkn2
+        jsr gcopy
+gkn2:
         pla
         sta PTRH
         pla
@@ -8424,11 +8475,15 @@ rsvk:   lda PTR
         pla
         sta PTR
         jmp rsvh
-rkdo:   jsr gkset               ; PTR = table, GLEN = NCONT * 64
+rkdo:   jsr gkset               ; PTR = table, GLEN = NCONT * 64 (first block)
         ldx #5
         ldy #0
         jsr rpad
+        jsr rpbig
+        jsr gk2                 ; the second block continues in the REU
+        bcs rkn
         jmp rpbig
+rkn:    rts
 
 ; boot: is the REU still holding our last session (a reset, not a
 ; power-off)? Same checks as a NeoRAM.
@@ -8698,7 +8753,8 @@ DMNK:   .byte 0,0,0,0,0,0
 DMUSE:  .byte 0,0,0,0,0,0,0,0
 DMKEYS: .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
         .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-DMMK:   .byte $D7                ; DMUSE..DMMK = 57 bytes saved with the session
+DMMK:   .byte $D7                ; DMUSE..NFMT = 58 bytes saved with the session
+NFMT:   .byte $B1                ; the node record layout (24-char names + time)
 
 
 ; ===== radio configuration =============================================
@@ -9160,17 +9216,27 @@ bwtab:  .byte 144,208,3,0
 ; PTR -> contact slot for the index in A
 contptr:
         sta PTR
-        lda #0
-        sta PTRH
-        ldx #6
-cptl:   asl PTR
-        rol PTRH
-        dex
-        bne cptl
-; the table base is page-aligned and depends on the reu: see s2init
-        lda PTRH
+        cmp #160
+        bcc cp0
+        sbc #160                ; slots 160.. are at $8000
+        sta PTR
+        lda #128
+        bne cp1
+cp0:    lda CBASEH              ; the first block: page-aligned, depends on the reu (see s2init)
+cp1:    pha
+        lda PTR
+        lsr
+        lsr
+        sta PTRH                ; slot * 64 = (slot >> 2) : (slot & 3) << 6
+        lda PTR
+        ror                     ; (the carry coming in only lands in a bit that is masked off)
+        ror
+        ror
+        and #192
+        sta PTR
+        pla
         clc
-        adc CBASEH
+        adc PTRH
         sta PTRH
         rts
 
@@ -9178,19 +9244,20 @@ cptl:   asl PTR
 ; 36-99 route, 100-131 name. Keep the parts we can act on.
 ; Only the type being fetched. The radio sends every contact -- it has no
 ; type filter -- so the choice is made here.
-rxcont: lda BUF+33
+rxcont: lda NTYPE
+        beq rxcc                ; 0: the background load keeps every type
+        lda BUF+33
         cmp NTYPE
         bne rxcrt
-        lda NCONT
-        cmp MAXCON
-        bcs rxcrt               ; table full; the rest are dropped
-        lda NCONT
+rxcc:
+        jsr rxslot              ; room, or the oldest node's slot; carry set = drop this one
+        bcs rxcrt
         jsr contptr
 ; Take the name from the RAW frame, not the converted copy. conv() makes
 ; PETSCII for CHROUT, but the menu draws through a2s, which expects ASCII
 ; -- running both turned every name uppercase.
         ldy #0
-rxcnl:  cpy #25
+rxcnl:  cpy #23                 ; (the time is kept at 24-25)
         bcs rxcnd
         lda BUF+100,y
         beq rxcnd
@@ -9233,7 +9300,7 @@ rxcrl:  cpx #4
 rxcrd:  ldy #59
         lda BUF+33
         sta (PTR),y
-        inc NCONT
+        jmp rxfin               ; the time; counted if appended
 rxcrt:  rts
 
 ; ===== Ultimate Command Interface: GET_TIME (s13, mkuci.py) ============
@@ -9789,7 +9856,8 @@ S3ORG = EQU["LOGODAT"] + os.path.getsize(
 S4ORG = 0x6800
 S4IMG = 0x8000
 S5ORG = 0x9960             # segment 5: $9960-$9AFF, 416 bytes
-S5MAX = 0x9B00
+S5MAX = 0x9CC0
+S5IMGEND = 0x9D00             # the boot copy moves whole pages: 4 of them ($9960..$9CFF)
 SEG5 = b''
 NOREU_LINES = (S4ORG - 0x4000) // 40
 SRC5 = r"""
@@ -9926,7 +9994,18 @@ dmfx1:  sta DMUSE,x
         bpl dmfx1
         lda #$D7
         sta DMMK
-dmfx2:  rts
+dmfx2:  lda NFMT                ; nodes saved by an older build have another layout: drop
+        cmp #$B1                ; them (the history stays); the lists load again
+        beq dmfx5
+        lda #0
+        sta NCONT
+        ldx #4
+dmfx4:  sta TLOAD,x
+        dex
+        bpl dmfx4
+        lda #$B1
+        sta NFMT
+dmfx5:  rts
 F7M:    .byte 0
 F7C:    .byte 0
 ; the DM conversations with the session (57 bytes at +176 of the header)
@@ -9934,22 +10013,243 @@ gdmsv:  ldx #0
 gdms1:  lda DMUSE,x
         sta GEOWIN+176,x
         inx
-        cpx #57
+        cpx #58
         bcc gdms1
         rts
 gdmld:  ldx #0
 gdml1:  lda GEOWIN+176,x
         sta DMUSE,x
         inx
-        cpx #57
+        cpx #58
         bcc gdml1
         jmp dmfix
-rdmp:   lda #57
+rdmp:   lda #58
         sta RPN
         lda #<DMUSE
         ldx #>DMUSE
         ldy #176
         jmp rphp
+
+
+; ===== node lists loaded in the background at start (v2.0.2d) =============
+; A few seconds after start, if any node list is not marked loaded, ask the radio for all its nodes once and
+; keep every type (rxcont with NTYPE = 0). While it streams, SCBUSY defers the message sync exactly as
+; for a list fetched by hand; the keyboard stays live. The radio's END frame (dispat) finishes it: the lists
+; are marked loaded unless the table filled, and the table and session are saved.
+; BGST: 0 = not yet, 4 = waiting to start, 1 = running, 3 = finished or switched off.
+bgtick: lda BGST
+        cmp #1
+        beq bgrun
+        cmp #3
+        beq bgrt
+        cmp #4
+        beq bgw
+        lda NCONT               ; first call. A node table already here (restored from the REU /
+        beq bgstamp             ; GeoRAM)? Then every list is taken as loaded: nothing to fetch
+        ldx #4
+bgm:    lda #1
+        sta TLOAD,x
+        dex
+        bne bgm
+        lda #3
+        sta BGST
+        rts
+bgstamp: lda $A1                ; nothing yet: note the time, start in ~9 s
+        sta BGT
+        lda #4
+        sta BGST
+        rts
+bgw:    lda UIMODE
+        ora SCBUSY
+        bne bgrt
+        lda $A1
+        sec
+        sbc BGT
+        cmp #2
+        bcs bgst
+bgrt:   rts
+bgst:   lda #0
+        sta NCONT
+        ldx #4
+bgz:    sta TLOAD,x
+        dex
+        bpl bgz
+        sta NTYPE               ; 0 = keep every type
+        lda #1
+        sta SCBUSY
+        sta BGST
+        lda $A1
+        sta BGT
+        lda #4                  ; CMD_GET_CONTACTS, everything
+        sta TXBUF
+        lda #1
+        sta TXLEN
+        jmp sendfr
+bgrun:  lda $A1                 ; running: give up after ~3 minutes
+        sec
+        sbc BGT
+        cmp #42
+        bcc bgrt
+        lda #0
+        sta BGOK
+        jmp bgfin
+; the radio's END_OF_CONTACTS (from dispat)
+bgend:  lda BGST
+        cmp #1
+        bne bgrt
+        lda #1
+        sta BGOK
+bgfin:  lda #3
+        sta BGST
+        lda #0
+        sta SCBUSY
+        lda #1
+        sta NTYPE
+        lda BGOK
+        beq bgsv
+        ldx #4                  ; (a full table kept the newest nodes: still a complete list)
+bgl:    lda #1
+        sta TLOAD,x
+        dex
+        bne bgl
+bgsv:   jsr gsvk
+        lda SYNCP
+        beq bgn
+        lda #0
+        sta SYNCP
+        jsr sync
+bgn:    lda #<sbgd
+        sta SPL
+        lda #>sbgd
+        sta SPH
+        jmp notice
+; opening a list (or the purge) while it runs: say so. Carry set = it is running (panel shown).
+bgguard: pha
+        lda BGST
+        cmp #1
+        beq bgb
+        cmp #3
+        beq bgg
+        lda #3                  ; a hand-made fetch first: no background load after all
+        sta BGST
+bgg:    pla
+        clc
+        rts
+bgb:    pla
+        jsr plinit
+        lda #<sbgb
+        ldx #>sbgb
+        jsr stl
+        lda NCONT
+        ldx #0
+        jsr stnum
+        lda #<sbgc
+        ldx #>sbgc
+        jsr stend
+        lda #<sbgt
+        sta MNTIT
+        lda #>sbgt
+        sta MNTITH
+        jsr plshow
+        sec
+        rts
+BGST:   .byte 0
+BGT:    .byte 0
+BGOK:   .byte 0
+sbgd:   .text "nodes loaded"
+        .byte 0
+sbgb:   .text "Loading nodes: "
+        .byte 0
+sbgc:   .text " so far"
+        .byte 0
+sbgt:   .text " Nodes "
+        .byte 0
+
+; ===== the node table keeps the NEWEST nodes (v2.0.2e) ===================
+; Slots 0-159 are at $4000.., slots 160-254 at $8000.. (contptr). Each record carries the node's
+; last-heard time (last_advert >> 10, 16 bits, at offset 24-25). When a node arrives and the table is
+; full it replaces the oldest one -- if it is newer -- instead of being dropped.
+; rxslot: A = the slot for the node in BUF (carry set = drop it)
+rxslot: lda NCONT
+        cmp MAXCON
+        bcc rxs9                ; room: append
+        jsr rxts                ; RXT = the new node's time
+        lda #0
+        sta RXI
+        sta RXC
+        jsr contptr
+        ldy #24
+        lda (PTR),y
+        sta RXCT
+        iny
+        lda (PTR),y
+        sta RXCT+1              ; the oldest so far: slot 0
+rxs1:   inc RXI
+        lda RXI
+        cmp NCONT
+        bcs rxs3
+        jsr contptr
+        ldy #24
+        lda (PTR),y
+        cmp RXCT
+        iny
+        lda (PTR),y
+        sbc RXCT+1
+        bcs rxs1                ; not older than the oldest so far
+        lda (PTR),y             ; older: it is the oldest now
+        sta RXCT+1
+        dey
+        lda (PTR),y
+        sta RXCT
+        lda RXI
+        sta RXC
+        jmp rxs1
+rxs3:   lda RXCT                ; take the oldest's slot only if the new node is NEWER
+        cmp RXT
+        lda RXCT+1
+        sbc RXT+1
+        bcs rxs8                ; the oldest is not older: drop the new one
+        lda RXC
+rxs9:   sta RXSL
+        clc
+        rts
+rxs8:   sec
+        rts
+
+; ----- the node's last-heard time in RXT: (last_advert - 2025-06-15) / 4096 s, 16 bits.
+; 0 = never heard or older than the base; the range runs to 2033; 65535 = later than that.
+rxts:   lda FLEN
+        cmp #136
+        bcc rxz
+        lda BUF+132
+        sec
+        sbc #128
+        lda BUF+133
+        sbc #225
+        sta RXT
+        lda BUF+134
+        sbc #78
+        sta RXT+1
+        lda BUF+135
+        sbc #104
+        bcc rxz                 ; before the base
+        cmp #16
+        bcs rxmax
+        ldx #4
+rxsh:   lsr
+        ror RXT+1
+        ror RXT
+        dex
+        bne rxsh
+        rts
+rxmax:  lda #255
+        sta RXT
+        sta RXT+1
+        rts
+rxz:    lda #0
+        sta RXT
+        sta RXT+1
+        rts
 
 """
 SRC4 = r"""
@@ -10096,19 +10396,19 @@ kk1:    sta PTR
 skeys3: .byte 5
         .text "f1"
         .byte 154
-        .text " menu  "
+        .text " menu "
         .byte 5
         .text "f3"
         .byte 154
-        .text " 40/80  "
+        .text " 40/80 "
         .byte 5
         .text "f5"
         .byte 154
-        .text " scroll  "
+        .text " scroll "
         .byte 5
         .text "f7"
         .byte 154
-        .text " new"
+        .text " channels"
         .byte 13,0
 
 ; ===== menus on the 80 column screen (s33, mkmir.py) ===================
@@ -10583,8 +10883,8 @@ pgd1:   jsr plinit
         lda PGRM
         ldx #0
         jsr stnum
-        lda #<tpg4              ; " of n old ones"
-        ldx #>tpg4
+        lda #<sof6              ; " of n old ones"
+        ldx #>sof6
         jsr stcat
         lda PGN
         ldx #0
@@ -10672,8 +10972,6 @@ tpgr:   .text "  removed "
 tpg2:   .text "Checked   "
         .byte 0
 tpg3:   .text "Removed   "
-        .byte 0
-tpg4:   .text " of "
         .byte 0
 tpg5:   .text "Older than "
         .byte 0
@@ -10802,7 +11100,7 @@ skeys2: .byte 5
         .byte 5
         .text "f7"
         .byte 154
-        .text " new msgs"
+        .text " channels"
         .byte 13,0
 
 
@@ -12459,12 +12757,12 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
     # neighbour rather than fail loudly if they collide. PKBUF sitting
     # immediately after CONTACTS is exactly the adjacency worth checking.
     regions = [("CONTACTS", 96 * 64), ("PKBUF", 10 * 32),
-               ("CHNAM", 48 * 18), ("CUNR", 48), ("PROMPT", 80), ("NODENM", 20), ("NODETAB", 255 * 2),
-               ("NODEIX", 255),
+               ("CHNAM", 48 * 18), ("CUNR", 48), ("PROMPT", 80), ("NODENM", 20), ("NODETAB", 128 * 2),
+               ("NODEIX", 128),
                ("PLTAB", 10 * 2),
                ("DECBUF", 12), ("CHNAME", 32), ("FWVER", 20),
                ("INPASC", 32), ("SECBUF", 16),
-               ("PLBUF", 10 * 32), ("TSTR", 40), ("RBUF", 256), ("TXBUF", 256),
+               ("PLBUF", 12 * 32), ("TSTR", 40), ("RBUF", 256), ("TXBUF", 256),
                ("SBUF", 256), ("CBUF", 256), ("BUF", 256),
                ("BMBASE", 8000), ("BMCOL", 1000)]
     spans = sorted((EQU[n], EQU[n] + sz, n) for n, sz in regions)
@@ -12526,7 +12824,7 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
     # its image: segment 4's pages, then two pages whose bytes from $60 on
     # are $9960-$9AFF (main copies Y = $60.. of the first, all of the second)
     prg += bytes(256 * ((len(code4) + 255) // 256) - len(code4))
-    prg += bytes(S5ORG - 0x9900) + SEG5 + bytes(S5MAX - S5ORG - len(SEG5))
+    prg += bytes(S5ORG - 0x9900) + SEG5 + bytes(S5IMGEND - S5ORG - len(SEG5))
     with open(out, "wb") as f:
         f.write(prg)
     return code, syms, prg, bit, half

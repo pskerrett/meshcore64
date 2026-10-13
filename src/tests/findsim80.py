@@ -81,6 +81,7 @@ check("hint after that is the plain one", hint() == "RET pick / find  R refresh 
 
 # title: " repeaters (3/12) "
 m.mem[S("NTYPE")] = 2
+m.mem[E["MAXCON"]] = 160; m.mem[E["NCONT"]] = 100   # a table with room
 for nv, tot, flt, want in [(3, 12, 1, " repeaters (3/12) "), (12, 12, 0, " repeaters (12) "),
                            (1, 100, 1, " repeaters (1/100) "), (0, 7, 1, None)]:
     m.mem[S("NVIS")] = nv; m.mem[S("NTOT")] = tot; m.mem[S("NFLEN")] = flt
@@ -89,4 +90,10 @@ for nv, tot, flt, want in [(3, 12, 1, " repeaters (3/12) "), (12, 12, 0, " repea
     while m.mem[a]: b.append(m.mem[a]); a += 1
     got = "".join(chr(x + 32 if 65 <= x <= 90 else x) for x in b)
     if want: check("title %r" % want, got == want)
+# a full table: the title says the nodes are the newest
+m.mem[E["NCONT"]] = 160; m.mem[S("NVIS")] = 12; m.mem[S("NFLEN")] = 0
+m.call("ndtit")
+a = S("NTBUF"); b = []
+while m.mem[a]: b.append(m.mem[a]); a += 1
+check("title of a full table", "".join(chr(x + 32 if 65 <= x <= 90 else x) for x in b) == " repeaters (12) newest ")
 print("FAILURES:", bad); sys.exit(1 if bad else 0)
