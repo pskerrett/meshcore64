@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""v2.0.2e: 255-node table (two blocks), last-heard times, the newest nodes kept, saved-format marker (meshcore64) in py65."""
+"""v2.1: 234-node table (138 at $4000, 96 at $8000) (two blocks), last-heard times, the newest nodes kept, saved-format marker (mlv202e) in py65."""
 import sys, os, importlib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".")); sys.path.insert(0, os.path.dirname(__file__))
 from py65.devices.mpu6502 import MPU
@@ -15,13 +15,13 @@ def check(n, c, extra=""):
     print("%-4s %s %s" % ("ok" if c else "FAIL", n, extra))
 BASE = 1_750_000_000
 def T(units): return BASE + 4096 * units + 17           # a last_advert that rxts turns into `units`
-def new(cbase=0x40, maxcon=255):
+def new(cbase=0x40, maxcon=234):
     m = B.M(mod, code, syms, prg)
     for n in ("gsvk", "sync", "notice"): m.mem[A(n)] = 0x60
     m.mem[A("CBASEH")] = cbase; m.mem[A("MAXCON")] = maxcon
     return m
 def rec(i, cbase=0x40):
-    return (cbase << 8) + 64 * i if i < 160 else 0x8000 + 64 * (i - 160)
+    return (cbase << 8) + 64 * i if i < 138 else 0x8000 + 64 * (i - 138)
 def call(m, label, a=0, x=0, y=0, limit=2000000):
     t = 0x0300; m.mem[t:t + 3] = [0x20, A(label) & 255, A(label) >> 8]
     c = MPU(memory=m.mem); c.pc, c.sp, c.a, c.x, c.y = t, 0xFF, a, x, y
@@ -38,7 +38,7 @@ def frame(m, typ, ts, name=b"newnode", flen=148, key=1):
 def times(m, n): return [m.mem[rec(i) + 24] | m.mem[rec(i) + 25] << 8 for i in range(n)]
 # --- contptr
 m = new()
-for i, want in ((0, 0x4000), (1, 0x4040), (3, 0x40C0), (4, 0x4100), (159, 0x4000 + 159 * 64), (160, 0x8000), (161, 0x8040), (254, 0x8000 + 94 * 64)):
+for i, want in ((0, 0x4000), (1, 0x4040), (3, 0x40C0), (4, 0x4100), (137, 0x4000 + 137 * 64), (138, 0x8000), (139, 0x8040), (233, 0x8000 + 95 * 64)):
     c = call(m, "contptr", a=i, x=9, y=7)
     check("contptr(%d) = $%04X" % (i, want), (m.mem[0xFB] | m.mem[0xFC] << 8) == want or (m.mem[A("PTR")] | m.mem[A("PTRH")] << 8) == want, hex(m.mem[A("PTR")] | m.mem[A("PTRH")] << 8))
     if i == 0: check("contptr keeps X and Y", c.x == 9 and c.y == 7)
@@ -87,14 +87,14 @@ frame(m, 1, T(1), name=b"new", key=60); call(m, "rxcont")
 check("an unknown time is the first to go", times(m, 4) == [6, 1, 8, 4], times(m, 4))
 # --- the second block: 255 slots, the oldest in block B is replaced there
 m = new(); m.mem[A("NTYPE")] = 0
-for i in range(255):
+for i in range(234):
     frame(m, 1 + i % 4, T(1000 + i), name=b"n%03d" % i, key=(i % 250) + 1)
     m.mem[A("BUF") + 1] = i & 255; m.mem[A("BUF") + 2] = i >> 8 if i > 255 else 0
     call(m, "rxcont")
-check("255 nodes held, two blocks", m.mem[A("NCONT")] == 255)
-check("slot 160 is at $8000 and 254 at $9780", bytes(m.mem[0x8000 + i] for i in range(4)) == b"n160" and bytes(m.mem[0x8000 + 94 * 64 + i] for i in range(4)) == b"n254")
+check("234 nodes held, two blocks", m.mem[A("NCONT")] == 234)
+check("slot 138 is at $8000 and 233 at $97C0", bytes(m.mem[0x8000 + i] for i in range(4)) == b"n138" and bytes(m.mem[0x8000 + 95 * 64 + i] for i in range(4)) == b"n233")
 frame(m, 2, T(5000), name=b"hot", key=77); call(m, "rxcont")
-check("a 256th node (newest) replaces the oldest: slot 0", bytes(m.mem[rec(0) + i] for i in range(3)) == b"hot" and m.mem[A("NCONT")] == 255)
+check("a 235th node (newest) replaces the oldest: slot 0", bytes(m.mem[rec(0) + i] for i in range(3)) == b"hot" and m.mem[A("NCONT")] == 234)
 m.mem[rec(200) + 24] = 0; m.mem[rec(200) + 25] = 0      # slot 200 (second block) becomes the oldest
 frame(m, 2, T(6000), name=b"hot2", key=78); call(m, "rxcont")
 check("the oldest in the second block is the one replaced", bytes(m.mem[rec(200) + i] for i in range(4)) == b"hot2" and bytes(m.mem[rec(0) + i] for i in range(3)) == b"hot")
@@ -102,8 +102,10 @@ check("the oldest in the second block is the one replaced", bytes(m.mem[rec(200)
 m = new(); m.mem[A("NCONT")] = 5; m.mem[A("NFMT")] = 0
 for i in range(5): m.mem[A("TLOAD") + i] = 1
 m.mem[A("DMMK")] = 0xD7; m.mem[A("DMUSE")] = 1
+m.mem[A("OFFSND")] = 0x5A; m.mem[A("NOTS")] = 0x33   # junk from an older session header
 call(m, "dmfix")
-check("old node format: table dropped, lists reload, history untouched, marker set", m.mem[A("NCONT")] == 0 and all(m.mem[A("TLOAD") + i] == 0 for i in range(5)) and m.mem[A("NFMT")] == 0xB1 and m.mem[A("DMUSE")] == 1)
+check("old format: the settings start at their defaults", m.mem[A("OFFSND")] == 0 and m.mem[A("NOTS")] == 0)
+check("old node format: table dropped, lists reload, history untouched, marker set", m.mem[A("NCONT")] == 0 and all(m.mem[A("TLOAD") + i] == 0 for i in range(5)) and m.mem[A("NFMT")] == 0xB4 and m.mem[A("DMUSE")] == 1)
 m.mem[A("NCONT")] = 9; m.mem[A("TLOAD") + 2] = 1
 call(m, "dmfix")
 check("current format: nothing touched", m.mem[A("NCONT")] == 9 and m.mem[A("TLOAD") + 2] == 1)

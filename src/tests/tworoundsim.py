@@ -50,7 +50,7 @@ def machine(kind, store, cbase=0x40):
     m.mem[A("gsvh")] = prg[2 + s2off + (A("gsvh") - 0xA000)]
     m.mem[A("RU")] = 2 if kind == "geo" else 1
     m.mem[A("GBLKS")] = 128; m.mem[A("LSHIFT")] = 9; m.mem[A("UKH")] = 8
-    m.mem[A("CBASEH")] = cbase; m.mem[A("MAXCON")] = 255
+    m.mem[A("CBASEH")] = cbase; m.mem[A("MAXCON")] = 234
     if kind == "reu":
         t = 0x0300; m.mem[t:t + 3] = [0x20, A("rdset") & 255, A("rdset") >> 8]
         c = MPU(memory=m.mem); c.pc, c.sp, c.a = t, 0xFF, 9
@@ -63,9 +63,9 @@ def run(m, label, limit=40000000):
         if c.pc == t + 3: return
         c.step()
     raise AssertionError(label + " hung")
-def rec(i): return 0x4000 + 64 * i if i < 160 else 0x8000 + 64 * (i - 160)
+def rec(i): return 0x4000 + 64 * i if i < 138 else 0x8000 + 64 * (i - 138)
 for kind, store in (("geo", GeoRAM()), ("reu", REU())):
-    for n in (40, 160, 161, 255):
+    for n in (40, 138, 139, 234):
         m1 = machine(kind, store)
         m1.mem[A("NCONT")] = n; m1.mem[A("NTYPE")] = 2
         for i in range(n):

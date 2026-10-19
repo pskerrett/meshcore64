@@ -250,6 +250,9 @@ EQU = {
     # nine would be 28 lines each, barely better than the 24-line ring
     # this replaces.
     "ARCRAM":  0x4000,
+    "CREG":    0xC760,   # v2.1: channel/DM -> history region + 1 (48)
+    "ROWN":    0xC790,   # region -> owner + 1 (8)
+    "RAGE":    0xC798,   # region age (8)
     "ARCTL":   0xCFF2,   # scratch for the slot x40 multiply
     "ARCTH":   0xCFF3,
     "PKBUF":   0x9800,   # the picker's own lines: 10 x 32
@@ -327,14 +330,7 @@ main:
         sta PTR2H
         ldx #S2PG
         ldy #0
-s2cp:   lda (PTR),y
-        sta (PTR2),y
-        iny
-        bne s2cp
-        inc PTRH
-        inc PTR2H
-        dex
-        bne s2cp
+        jsr pgcp
         lda blankb
         beq noblnk
         lda VICCTL
@@ -359,26 +355,22 @@ noblnk: lda #0              ; black ground and border: this is a terminal,
         sta PTR2H
         ldx #S4PG
         ldy #0
-s4cp:   lda (PTR),y
-        sta (PTR2),y
-        iny
-        bne s4cp
-        inc PTRH
-        inc PTR2H
-        dex
-        bne s4cp
-        lda #$99                ; segment 5: image -> $9960..$9AFF
+        jsr pgcp
+        lda #$99                ; segment 5: image -> $9960..$9CFF
         sta PTR2H
         ldx #4
         ldy #$60
-s5cp:   lda (PTR),y
-        sta (PTR2),y
-        iny
-        bne s5cp
-        inc PTRH
-        inc PTR2H
-        dex
-        bne s5cp
+        jsr pgcp
+        lda #$62                ; segment 6: image -> $6280..$67FF
+        sta PTR2H
+        ldx #6
+        ldy #$80
+        jsr pgcp                ; (Y is 0 again)
+        lda #$03                ; segment 7: image -> $0340..$03FF
+        sta PTR2H
+        ldx #1
+        ldy #$40
+        jsr pgcp
 
         lda #0
         sta STATE
@@ -1398,6 +1390,16 @@ w1l:    cmp JIFFY
         beq w1l
         rts
 
+; X pages from (PTR),Y to (PTR2),Y
+pgcp:   lda (PTR),y
+        sta (PTR2),y
+        iny
+        bne pgcp
+        inc PTRH
+        inc PTR2H
+        dex
+        bne pgcp
+        rts
 prtstr: ldy #0
 psl:    lda (PTR),y
         beq psd
@@ -2108,7 +2110,7 @@ sndnew: .text " newest"
 ; the second block of the node table: slots 160 and up live at $8000. carry set = none
 gk2:    lda NCONT
         sec
-        sbc #160
+        sbc #138
         bcc gk2n
         beq gk2n
         sta GLENL
@@ -3378,7 +3380,7 @@ dmwno:  sec
 ; include them and pad short.
 shomsg: lda blankb
         bne smrt            ; nothing to look at with the screen off
-        jsr bkprm
+        jsr bkprm6          ; (and the time onto the rule above)
         lda #255
         sta SMC
         ldx #11
@@ -4498,9 +4500,12 @@ mainmnu:
         beq mmrad
         cmp #4
         beq mmadd
-        cmp #5                  ; "40/80 column mode", or "close"
+        cmp #5
+        beq mmset
+        cmp #6                  ; "40/80 column mode", or "close"
         bne mmshut
         jmp mmcol
+mmset:  jmp setpan
 mmshut: lda #147
         jsr CHROUT
         jmp setchan             ; repaint the chat and the prompt
@@ -5594,24 +5599,23 @@ spfd:   rts
 ; Which region a channel archives to. Without an REU there is only one --
 ; the merged feed -- and every line in it already carries a [channel]
 ; prefix, so it still says where each message came from.
-lreg:   ldx RU
-        bne lrreu
-        lda #8
-        sta REGION
+lreg:   ldx RU                  ; (v2.1: regions are handed out by lregw)
+        beq lr8
+        cmp #255
+        beq lr8
+        cmp #48
+        bcs lr9
+        tax
+        lda CREG,x
+        beq lr9
+        tax
+        dex
+        stx REGION
         rts
-lrreu:  cmp #255
-        bne lrn
-        lda #8
+lr9:    lda #9                  ; none yet: a region that is always empty
+        .byte 44
+lr8:    lda #8
         sta REGION
-        rts
-lrn:    cmp #40
-        bcs lrdm
-        cmp #6
-        bcc lrok
-        lda #6
-        bne lrok
-lrdm:   lda #7                  ; direct messages
-lrok:   sta REGION
         rts
 
 ; ===== append SLEN lines from SBUF to REGION ===========================
@@ -5684,13 +5688,14 @@ lpdone: jmp gsvh                ; GeoRAM: pointers + unread survive
 ; that scrolling the merged feed still says where each line came from.
 arcmsg:
 ; Callers pass the channel in TMP, but lput and chnptr below both use TMP
-; as scratch. Take a private copy before either runs.
-        lda TMP
+; as scratch. Take a private copy before either runs. (tsget notes the
+; message's time for the rule above it, sounds the alert, and returns TMP.)
+        jsr tsget
         sta MCH
         lda RU
         beq amall               ; no REU: the merged region only
         lda MCH                 ; the channel it arrived on
-        jsr lreg
+        jsr lregw
         jsr lsep                ; rule above it
         lda #11
         sta SOFF
@@ -5794,7 +5799,7 @@ aocd:   txa
         lda RU
         beq aoall               ; no REU: lreg would return region 8 here
         lda CC                  ; too, and the line would be stored twice
-        jsr lreg
+        jsr lregw
         jsr lsep
         jsr scrnm
         jsr lput
@@ -6507,7 +6512,7 @@ pyastart: .byte 1,0,0,0,0,0,0,0,67,54,52
 pyquery:  .byte 22,3
 pychan:   .byte 31,0
 pytime:   .byte 5
-banner: .text "meshcore 64  v2.0.2"
+banner: .text "meshcore 64  v2.1"
         .byte 13,0
 svideo: .text "video    "
         .byte 0
@@ -6535,7 +6540,7 @@ mi4:    .text "Add/remove channel"
         .byte 0
 mi5:    .text "Close"
         .byte 0
-mtab:   .word mi0,mi1,mi2,mi3,mi4,mi5
+mtab:   .word mi0,mi1,mi2,mi3,mi4,miset,mi5
 ; one colour per entry: red, yellow, cyan, purple, light green, light blue
 mnclrs: .byte 2,7,3,4,13,14,2,7,3,4,13,14,2,7,3,4
 ; sender colours, chosen by name hash. No green -- that is the message --
@@ -6692,7 +6697,7 @@ s2init: lda RU
         beq s2i1
         lda #64                 ; $4000
         sta CBASEH
-        lda #255                ; 160 at $4000.. and 95 at $8000.. (contptr)
+        lda #234                ; 138 at $4000.. and 96 at $8000.. (contptr)
         sta MAXCON
         rts
 s2i1:   lda #128                ; $8000
@@ -6815,7 +6820,7 @@ s2w3:   lda WANT2
         jsr dispat
         lda #0
         sta READY
-        jmp s2wait
+        jmp s2w1                ; v2.1: the timeout runs from the request, not the last frame
 s2w4:   lda BUF
         clc
         rts
@@ -6903,10 +6908,10 @@ csnx:   inc SCANI
 cserr:  lda #0
         sta READY
         jmp csdone
-; One silent slot is skipped. Two in a row means the radio is not
+; One silent slot is asked for again (v2.1: it used to be skipped, and a
+; channel there went missing). Two in a row means the radio is not
 ; answering at all, and forty more 3-second waits would look like a hang.
-cstmo:  inc SCANI
-        inc CSTMO
+cstmo:  inc CSTMO               ; v2.1: a lost reply: ask for the same slot again
         lda CSTMO
         cmp #2
         bcc cslp
@@ -8083,9 +8088,9 @@ gsc1:   lda PTR
         sta GDIR
         lda #1
         sta GPAG
-        lda #<864
+        lda #<928               ; + the region table (v2.1)
         sta GLENL
-        lda #>864
+        lda #>928
         sta GLENH
         jsr gcopy
         pla
@@ -8127,10 +8132,10 @@ gkset:  lda #0
         sta PTRH
         lda #1
         sta GBLK
-        lda NCONT               ; x64 (the first block: 160 slots at most)
-        cmp #160
+        lda NCONT               ; x64 (the first block: 138 slots at most)
+        cmp #138
         bcc gkc
-        lda #160
+        lda #138
 gkc:    sta GLENL
         lda #0
         sta GLENH
@@ -8168,10 +8173,9 @@ grsg:   lda GEOWIN,x
         bne grnew
         lda GEOWIN+7
         cmp MAXCON
-        beq grs2
-        bcs grnew
-grs2:   lda GEOWIN+7
-        sta NCONT
+        bcc grs2
+        lda MAXCON
+grs2:   sta NCONT
         lda GEOWIN+8
         sta CKED
         lda GEOWIN+9
@@ -8212,9 +8216,9 @@ grsu:   lda GEOWIN+128,x
         lda #1
         sta GPAG
         sta GDIR
-        lda #<864
+        lda #<928               ; + the region table (v2.1)
         sta GLENL
-        lda #>864
+        lda #>928
         sta GLENH
         jsr gcopy
 ; nodes
@@ -8225,7 +8229,7 @@ grsu:   lda GEOWIN+128,x
         jsr gk2
         bcs gkn2
         jsr gcopy
-gkn2:
+gkn2:   jsr lrfix               ; v2.1: the history regions of an older session
         pla
         sta PTRH
         pla
@@ -8453,9 +8457,9 @@ rcdo:   lda #<CHNAM
         sta PTR
         lda #>CHNAM
         sta PTRH
-        lda #<864
+        lda #<928               ; + the region table (v2.1)
         sta GLENL
-        lda #>864
+        lda #>928
         sta GLENH
         ldx #1
         ldy #0
@@ -8514,10 +8518,9 @@ rrsg:   lda RHB,x
         bne rrnew
         lda RHB+7
         cmp MAXCON
-        beq rrs2
-        bcs rrnew
-rrs2:   lda RHB+7
-        sta NCONT
+        bcc rrs2
+        lda MAXCON
+rrs2:   sta NCONT
         lda RHB+8
         sta CKED
         lda RHB+9
@@ -8534,6 +8537,7 @@ rrst:   lda RHB+10,x
         jsr dmfix
         jsr rcdo
         jsr rkdo
+        jsr lrfix               ; v2.1: the history regions of an older session
         pla
         sta PTRH
         pla
@@ -8561,9 +8565,7 @@ lsep:   ldx #39
 lsl:    sta SBUF,x
         dex
         bpl lsl
-        lda #1
-        sta SLEN
-        jmp lput
+        jmp lsep6               ; the message's time on it, then lput
 ; scrn, then flag the first row as a message start
 scrnm:  jsr scrn
         lda SBUF+39
@@ -8617,8 +8619,8 @@ apcol:  lda PTR
         cmp #64
         bne acm
         ldy #0
-        lda #11                 ; a separator: dark grey
-        jmp acfill
+        lda #11                 ; a separator: dark grey (its time light grey)
+        jmp acrul6
 acm:    ldy #39
         lda (PTR),y
         bpl actxt               ; a continuation row: all text
@@ -8753,8 +8755,10 @@ DMNK:   .byte 0,0,0,0,0,0
 DMUSE:  .byte 0,0,0,0,0,0,0,0
 DMKEYS: .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
         .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-DMMK:   .byte $D7                ; DMUSE..NFMT = 58 bytes saved with the session
-NFMT:   .byte $B1                ; the node record layout (24-char names + time)
+DMMK:   .byte $D7                ; DMUSE..NOTS = 60 bytes saved with the session
+NFMT:   .byte $B4                ; the node record layout (24-char names + time; 138-slot first block; v2.1)
+OFFSND: .byte 0                  ; alert: 0 every message, 1 DMs only, 2 off
+NOTS:   .byte 0                  ; 1 = no timestamps
 
 
 ; ===== radio configuration =============================================
@@ -9216,9 +9220,9 @@ bwtab:  .byte 144,208,3,0
 ; PTR -> contact slot for the index in A
 contptr:
         sta PTR
-        cmp #160
+        cmp #138
         bcc cp0
-        sbc #160                ; slots 160.. are at $8000
+        sbc #138                ; slots 138.. are at $8000
         sta PTR
         lda #128
         bne cp1
@@ -9859,7 +9863,669 @@ S5ORG = 0x9960             # segment 5: $9960-$9AFF, 416 bytes
 S5MAX = 0x9CC0
 S5IMGEND = 0x9D00             # the boot copy moves whole pages: 4 of them ($9960..$9CFF)
 SEG5 = b''
-NOREU_LINES = (S4ORG - 0x4000) // 40
+SEG6 = b''
+S6MAX = 0x6800
+SEG7 = b''
+S7ORG = 0x0340
+S7MAX = 0x0400
+SRC7 = r"""
+; ===== segment 7 (v2.1): $0340-$03FF, the cassette buffer (the cartridge's
+; mover uses it at boot only). Copied there by main.
+; ===== history regions handed out on demand (v2.1) ========================
+; Regions 0-7 go to whichever channels and DM conversations actually get
+; messages; "All" keeps 8. They used to be fixed: channels 0-5 their own,
+; every channel from 6 up shared region 6 and every DM conversation region 7,
+; so switching between those showed the same messages. When all eight are
+; taken, the one written to longest ago is wiped and handed over.
+; CREG[0..47] = region+1 (0 = none), ROWN[0..7] = owner+1, RAGE[0..7] = age.
+; Saved with the channel names (they follow them at $C760).
+lregw:  sta LRCH
+        jsr lreg
+        lda REGION
+        cmp #9
+        bne lrw6                ; it has one (or it is "All")
+        ldx #7
+lrw1:   lda ROWN,x              ; a free one?
+        beq lrw4
+        dex
+        bpl lrw1
+        ldx #0                  ; none: the oldest
+        ldy #7
+lrw2:   lda RAGE,y
+        cmp RAGE,x
+        bcc lrw3
+        tya
+        tax
+lrw3:   dey
+        bpl lrw2
+        ldy ROWN,x              ; its owner loses it
+        lda #0
+        sta CREG-1,y
+        sta LWL,x
+        sta LWH,x
+        sta LFL,x
+        sta LFH,x
+lrw4:   ldy LRCH
+        iny
+        tya
+        sta ROWN,x
+        txa
+        tay
+        iny
+        tya
+        ldy LRCH
+        sta CREG,y
+        stx REGION
+        jsr gsvc                ; the table is saved with the channel names: now
+lrw6:   ldx #7                  ; everyone ages; the one written to is new
+lrw7:   lda RAGE,x
+        cmp #255
+        beq lrw8
+        inc RAGE,x
+lrw8:   dex
+        bpl lrw7
+        ldx REGION
+        cpx #8
+        bcs lrw9
+        lda #0
+        sta RAGE,x
+lrw9:   rts
+
+
+LRCH:   .byte 0
+"""
+SRC6 = r"""
+; ===== segment 6 (v2.1): timestamps, the alert sound, Settings ==========
+; Lives at $6280-$67FF: the top 1408 bytes of the node table's first block
+; (138 slots now, was 160) and of the RAM archive (220 lines, was 256).
+; Copied there from the image by main, after the splash.
+
+; ---- arcmsg's first instruction: note the message's time (and beep) ----
+; A = TMP on return (arcmsg goes on with sta MCH). Opcode 17 = channel
+; message (timestamp at BUF+7), 16 = DM (BUF+12).
+tsget:  lda #0
+        sta TSFL
+        lda BUF
+        cmp #17
+        beq tsg0
+        cmp #16
+        bne tsgx
+tsg0:   inc TSFL
+        jsr sndmsg              ; A = the opcode
+        ldx #7
+        lda BUF
+        cmp #17
+        beq tsg1
+        ldx #12
+tsg1:   ldy #0
+tsg2:   lda BUF,x
+        sta UCAC,y
+        inx
+        iny
+        cpy #4
+        bcc tsg2
+        lda UCAC+3              ; before late 2023: the sender has no clock
+        cmp #$65
+        bcc tsgnow
+        lda TSOK                ; ahead of our clock by more than ~17 min:
+        beq tsgf                ; take ours
+        lda NOWTS+1
+        clc
+        adc #4
+        sta TSV+1
+        lda NOWTS+2
+        adc #0
+        sta TSV+2
+        lda NOWTS+3
+        adc #0
+        cmp UCAC+3
+        bcc tsgnow
+        bne tsgf
+        lda TSV+2
+        cmp UCAC+2
+        bcc tsgnow
+        bne tsgf
+        lda TSV+1
+        cmp UCAC+1
+        bcc tsgnow
+tsgf:   jsr tsfmt
+tsgx:   lda TMP
+        rts
+tsgnow: jsr tsnow
+        lda TMP
+        rts
+
+; TSB/TSLEN = now, or nothing when the radio has not told us the time
+tsnow:  lda #0
+        sta TSLEN
+        lda TSOK
+        beq tsnx
+        ldx #3
+tsn1:   lda NOWTS,x
+        sta UCAC,x
+        dex
+        bpl tsn1
+        jmp tsfmt
+tsnx:   rts
+
+; UCAC (UTC) -> TSB: "hh:mm" today, "Www dd Mon hh:mm" another day
+tsfmt:  jsr tsloc
+        ldx #3
+tsf1:   lda UCAC,x
+        sta TSV,x
+        lda NOWTS,x             ; today, in the same zone
+        sta UCAC,x
+        dex
+        bpl tsf1
+        jsr tsloc
+        jsr tsl0
+        ldx #9
+tsf2:   lda TSTR,x
+        sta TSDAY,x
+        dex
+        bpl tsf2
+        ldx #3
+tsf3:   lda TSV,x
+        sta UCAC,x
+        dex
+        bpl tsf3
+        jsr tsl0                ; TSTR = "yyyy/mm/dd hh:mm:ss..."
+        ldy #0
+        lda TSOK                ; we do not know what day it is yet: the time alone
+        beq tsfhm
+        ldx #9
+tsf4:   lda TSTR,x
+        cmp TSDAY,x
+        bne tsfo
+        dex
+        bpl tsf4
+        bmi tsfhm               ; today: the time alone
+tsfo:   ldx #3                  ; weekday: days since 1970 mod 7, 0 = Thursday
+tsf5:   lda TSV,x
+        sta UCAC,x
+        dex
+        bpl tsf5
+        lda #$80
+        ldx #$51
+        ldy #$01
+        jsr ucdiv
+        lda #7
+        ldx #0
+        ldy #0
+        jsr ucdiv
+        ldy #0
+        lda UCR
+        jsr ts3                 ; A*3 -> X
+        lda tswdn,x
+        jsr tsbput
+        lda tswdn+1,x
+        jsr tsbput
+        lda tswdn+2,x
+        jsr tsbput
+        lda #32
+        jsr tsbput
+        lda TSTR+8              ; day of the month, no leading zero
+        cmp #48
+        beq tsf6
+        jsr tsbput
+tsf6:   lda TSTR+9
+        jsr tsbput
+        lda #32
+        jsr tsbput
+        lda TSTR+6              ; month: "10" -> 9
+        sec
+        sbc #49
+        ldx TSTR+5
+        cpx #49
+        bcc tsf7
+        adc #9                  ; carry set: +10
+tsf7:   jsr ts3
+        lda tsmon,x
+        jsr tsbput
+        lda tsmon+1,x
+        jsr tsbput
+        lda tsmon+2,x
+        jsr tsbput
+        lda #32
+        jsr tsbput
+tsfhm:  ldx #11
+tsf8:   lda TSTR,x
+        jsr tsbput
+        inx
+        cpx #16
+        bcc tsf8
+        sty TSLEN
+        rts
+tsbput:  sta TSB,y
+        iny
+        rts
+ts3:    sta TSV
+        asl
+        adc TSV
+        tax
+        rts
+tsl0:   lda #<tsnul
+        ldx #>tsnul
+        jmp tsline
+; UCAC += the zone (UTCOFF, 15 minute steps), when we know it
+tsloc:  lda UTCOFF
+        cmp #$80
+        beq tzx
+        ldx #3
+tz1:    lda UCAC,x
+        sta TSW,x
+        lda #0
+        sta UCAC,x
+        dex
+        bpl tz1
+        lda UTCOFF
+        bpl tz2
+        eor #$FF
+        clc
+        adc #1
+tz2:    sta UCAC
+        lda #30
+        ldx #0
+        jsr ucmul
+        lda #30
+        ldx #0
+        jsr ucmul               ; |zone| * 900 seconds
+        ldx #0
+        ldy #4
+        lda UTCOFF
+        bmi tzs
+        clc
+tza:    lda TSW,x
+        adc UCAC,x
+        sta UCAC,x
+        inx
+        dey
+        bne tza
+        rts
+tzs:    sec
+tzs1:   lda TSW,x
+        sbc UCAC,x
+        sta UCAC,x
+        inx
+        dey
+        bne tzs1
+tzx:    rts
+
+; ---- lsep's tail: the rule above a message, with its time ----
+lsep6:  lda NOTS
+        bne ls6p
+        lda TSFL
+        bne ls61
+        jsr tsnow               ; our own message: now
+ls61:   ldy TSLEN
+        beq ls6p
+        lda #36
+        sec
+        sbc TSLEN
+        tax
+        lda #32
+        sta SBUF,x
+        sta SBUF+37
+        ldy #0
+ls62:   inx
+        lda TSB,y
+        jsr p2sc
+        sta SBUF,x
+        iny
+        cpy TSLEN
+        bcc ls62
+ls6p:   lda REGION
+        cmp #8                  ; "All" is always the last copy: done
+        bne ls6q
+        lda #0
+        sta TSFL
+ls6q:   lda #1
+        sta SLEN
+        jmp lput
+
+; ---- apcol, a rule row: dark grey, its time light grey ----
+acrul6: jsr acfill
+        ldy #20
+ar61:   lda (PTR),y
+        cmp #64
+        beq ar62
+        lda #15
+        sta (PTR2),y
+ar62:   iny
+        cpy #40
+        bcc ar61
+        rts
+
+; ---- k80flow's left half: a rule row is drawn plain (its time is on the right) ----
+kfrd6:  lda (PTR),y
+        cpy #20
+        bcc kr6x
+        pha
+        ldx KFI
+        lda KLR,x
+        cmp KRR,x
+        bne kr6p
+        pla
+        lda #64
+        rts
+kr6p:   pla
+kr6x:   rts
+
+; ---- shomsg: back to the prompt, then the time onto the rule above ----
+bkprm6: jsr bkprm
+        lda NOTS
+        bne tlx
+        lda BUF
+        cmp #17
+        beq tl1
+        cmp #16
+        bne tlx
+tl1:    lda TSLEN
+        beq tlx
+        jsr kcrow
+        sta TSRW
+        tax
+        beq tlx
+        dex
+        stx TSRA
+        lda K80
+        beq tl40
+        lda K40
+        bne tl40
+        txa
+        ldx #$10
+        ldy #0
+        jsr kaddr
+        lda #0
+        sta $D03F               ; read by index
+        lda $D03B
+        cmp #64
+        bne tlx
+        lda #1
+        sta $D035
+        lda $D03B
+        jmp tlchk
+tl40:   lda rowlo,x
+        sta tlrd+1
+        lda rowhi,x
+        sta tlrd+2
+        ldy #0
+        jsr tlrd
+        cmp #64
+        bne tlx
+        iny
+        jsr tlrd
+tlchk:  cmp #64
+        bne tlx
+        lda KSEPW
+        sec
+        sbc #3
+        sbc TSLEN
+        tay
+        ldx TSRA
+        clc
+        jsr kplot
+        lda #155                ; light grey
+        jsr CHROUT
+        lda #32
+        jsr CHROUT
+        lda #0
+        sta TSI
+tl2:    ldx TSI
+        lda TSB,x
+        jsr CHROUT
+        inc TSI
+        lda TSI
+        cmp TSLEN
+        bcc tl2
+        lda #32
+        jsr CHROUT
+        ldx TSRW
+        ldy #0
+        clc
+        jmp kplot
+tlx:    rts
+tlrd:   lda $0400,y
+        rts
+
+; ---- the alert: A = 16 (DM) or 17 (channel message) ----
+; OFFSND: 0 = every message, 1 = DMs only, 2 = off. Played from the
+; jiffy interrupt: two short triangle notes for a DM, one for a channel.
+sndmsg: ldx #sndm-sndtab
+        cmp #16
+        beq snd1
+        lda OFFSND
+        bne sndx
+        ldx #sndc-sndtab
+        bne snd2
+snd1:   lda OFFSND
+        cmp #2
+        bcs sndx
+snd2:   stx SNDI
+        lda SNDOLD+1
+        bne snd3
+        sei                     ; first time: hook the jiffy interrupt
+        lda $0314
+        sta SNDOLD
+        lda $0315
+        sta SNDOLD+1
+        lda #<sndirq
+        sta $0314
+        lda #>sndirq
+        sta $0315
+        cli
+snd3:   lda #15
+        sta $D418
+        lda #$09                ; attack 2 ms, decay 750 ms
+        sta $D405
+        lda #$09                ; sustain 0, release 750 ms
+        sta $D406
+        lda #1
+        sta SNDT                ; the next jiffy starts it
+sndx:   rts
+sndirq: lda SNDT
+        beq sqx
+        dec SNDT
+        bne sqx
+        lda #16                 ; gate off: the note rings out
+        sta $D404
+        ldx SNDI
+        lda sndtab,x
+        beq sqx
+        sta $D400
+        lda sndtab+1,x
+        sta $D401
+        inx
+        inx
+        stx SNDI
+        lda #17                 ; triangle, gate on
+        sta $D404
+        lda #4
+        sta SNDT
+sqx:    jmp (SNDOLD)
+sndtab:
+sndc:   .byte $A0,$45,0         ; C6
+sndm:   .byte $29,$34,$B9,$57,0 ; G5, E6
+
+; ---- F1 > Settings ----
+setpan: lda #1
+        sta UIMODE
+        lda #0
+        sta MNSEL
+spdraw: jsr plinit
+        jsr plnew
+        lda #<sssnd
+        ldx #>sssnd
+        jsr sppl
+        ldx OFFSND
+        jsr spval
+        jsr plend
+        jsr plnew
+        lda #<sstim
+        ldx #>sstim
+        jsr sppl
+        lda NOTS
+        clc
+        adc #3
+        tax
+        jsr spval
+        jsr plend
+        lda #147
+        jsr CHROUT
+        lda #7
+        sta MNX
+        lda #9
+        sta MNY
+        lda #26
+        sta MNW
+        lda PLN
+        sta MNN
+        lda #<PLTAB
+        sta MNPTR
+        lda #>PLTAB
+        sta MNPTRH
+        lda #<sstit
+        sta MNTIT
+        lda #>sstit
+        sta MNTITH
+        jsr menu
+        lda MNSEL
+        cmp #255
+        beq spdone
+        cmp #0
+        bne sp1
+        ldx OFFSND
+        inx
+        cpx #3
+        bcc sp0
+        ldx #0
+sp0:    stx OFFSND
+        lda #16                 ; let it be heard
+        jsr sndmsg
+        jmp spsv
+sp1:    lda NOTS
+        eor #1
+        sta NOTS
+spsv:   jsr gsvh                ; kept with the session (REU / GeoRAM)
+        jmp spdraw
+spdone: lda #0
+        sta UIMODE
+        jmp mmshut
+spval:  lda ssvl,x
+        pha
+        lda ssvh,x
+        tax
+        pla
+sppl:   sta SPL
+        stx SPH
+        jmp plstr
+
+; ---- data ----
+tsnul:  .byte 0
+tswdn:  .byte 212,72,85,198,82,73,211,65,84,211,85,78,205,79,78,212,85,69,215,69,68
+tsmon:  .byte 202,65,78,198,69,66,205,65,82,193,80,82,205,65,89,202,85,78
+        .byte 202,85,76,193,85,71,211,69,80,207,67,84,206,79,86,196,69,67
+miset:  .text "Settings"
+        .byte 0
+sstit:  .text " Settings "
+        .byte 0
+sssnd:  .text "Sound      "
+        .byte 0
+sstim:  .text "Timestamps "
+        .byte 0
+ssvl:   .byte <ssall,<ssdm,<ssoff,<sson,<ssoff
+ssvh:   .byte >ssall,>ssdm,>ssoff,>sson,>ssoff
+ssall:  .text "all"
+        .byte 0
+ssdm:   .text "DMs"
+        .byte 0
+ssoff:  .text "off"
+        .byte 0
+sson:   .text "on"
+        .byte 0
+TSFL:   .byte 0
+TSLEN:  .byte 0
+TSB:    .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+TSV:    .byte 0,0,0,0
+TSDAY:  .byte 0,0,0,0,0,0,0,0,0,0
+TSW:    .byte 0,0,0,0
+TSRW:   .byte 0
+TSRA:   .byte 0
+TSI:    .byte 0
+SNDI:   .byte 0
+SNDT:   .byte 0
+SNDOLD: .byte 0,0
+
+
+; ---- the history-region table after a restore (segment 7 has the allocator) ----
+; After every restore. The table is checked (anything out of range or
+; claimed twice is dropped) and the owners rebuilt from it. dmfix sets LRMF
+; for an older session: 1 = v2.0.2, whose channels 0-5 get regions 0-5 back
+; (that is where they always were; regions 6 and 7 held a mix and start
+; over); 2 = a v2.1 test build's, whose regions could hold any channel's
+; lines: all eight start over ("All" keeps everything, each line labelled).
+lrfix:  ldx #7
+        lda #0
+lrf0:   sta ROWN,x
+        sta RAGE,x
+        dex
+        bpl lrf0
+        ldy #0                  ; upward: of two claims, the lower channel keeps it
+lrf1:   ldx CREG,y
+        beq lrf3
+        cpx #9
+        bcs lrf2                ; out of range
+        lda ROWN-1,x
+        bne lrf2                ; that region already has an owner
+        tya
+        clc
+        adc #1
+        sta ROWN-1,x
+        bne lrf3
+lrf2:   lda #0
+        sta CREG,y
+lrf3:   iny
+        cpy #48
+        bcc lrf1
+lrf4:   lda #0
+        sta LRMF+1
+        ldy LRMF                ; 1 = a v2.0.2 session, 2 = one saved by a test build
+        beq lrfx
+        sta LRMF
+        ldx #5                  ; v2.0.2: regions 6 and 7 start over
+        cpy #2
+        bne lrf7
+        ldx #255                ; a test build's: all eight (they could hold anything)
+lrf7:   stx LRMF+1
+        ldx #7
+lrf8:   sta LWL,x
+        sta LWH,x
+        sta LFL,x
+        sta LFH,x
+        dex
+        cpx LRMF+1
+        bne lrf8
+        sta LRMF+1
+        ldx #47
+lrf5:   sta CREG,x
+        dex
+        bpl lrf5
+        cpy #2
+        beq lrf9
+        ldx #5                  ; v2.0.2: channels 0-5 were in regions 0-5
+lrf6:   txa
+        clc
+        adc #1
+        sta CREG,x
+        sta ROWN,x
+        dex
+        bpl lrf6
+lrf9:   jmp gsvc                ; and save it
+lrfx:   rts
+LRMF:   .byte 0,0
+"""
+S6ORG = 0x6280            # segment 6 (v2.1): $6280-$67FF
+NOREU_LINES = (S6ORG - 0x4000) // 40
 SRC5 = r"""
 ; ===== segment 5 (s43): the purge's remove phase =====
 ; carry set when the time at BUF+132+X is before the cutoff
@@ -9995,15 +10661,22 @@ dmfx1:  sta DMUSE,x
         lda #$D7
         sta DMMK
 dmfx2:  lda NFMT                ; nodes saved by an older build have another layout: drop
-        cmp #$B1                ; them (the history stays); the lists load again
+        cmp #$B4                ; them (the history stays); the lists load again
         beq dmfx5
+        ldy #1                  ; v2.1: the history regions are sorted out after the restore:
+        cmp #$B1                ; 1 = a v2.0.2 session, 2 = a test build's (v2.1a / $B2-$B3)
+        beq dmfx3
+        iny
+dmfx3:  sty LRMF
         lda #0
         sta NCONT
         ldx #4
 dmfx4:  sta TLOAD,x
         dex
         bpl dmfx4
-        lda #$B1
+        sta OFFSND              ; (A = 0) and the settings start at their defaults
+        sta NOTS
+        lda #$B4
         sta NFMT
 dmfx5:  rts
 F7M:    .byte 0
@@ -10013,17 +10686,17 @@ gdmsv:  ldx #0
 gdms1:  lda DMUSE,x
         sta GEOWIN+176,x
         inx
-        cpx #58
+        cpx #60
         bcc gdms1
         rts
 gdmld:  ldx #0
 gdml1:  lda GEOWIN+176,x
         sta DMUSE,x
         inx
-        cpx #58
+        cpx #60
         bcc gdml1
         jmp dmfix
-rdmp:   lda #58
+rdmp:   lda #60
         sta RPN
         lda #<DMUSE
         ldx #>DMUSE
@@ -11109,8 +11782,8 @@ skeys2: .byte 5
 mmsel2: lda K80
         bne mmsel               ; 80 on: "40 column mode"
         lda KWOK
-        beq mmsel               ; no Kawari: the usual six
-        lda #7
+        beq mmsel               ; no Kawari: the usual seven
+        lda #8
         sta MNN
         lda #<mtab40
         sta MNPTR
@@ -11125,7 +11798,7 @@ mmc1:   lda KWOK
         beq mmc2
         jsr k80on
 mmc2:   jmp mmshut              ; clear and repaint the chat
-mtab40: .word mi0,mi1,mi2,mi3,mi4,mi80,mi5
+mtab40: .word mi0,mi1,mi2,mi3,mi4,miset,mi80,mi5
 mi80:   .text "80 column mode"
         .byte 0
 KWOK:   .byte 0
@@ -11136,14 +11809,14 @@ KWOK:   .byte 0
 ; column chat is on.
 mmsel:  lda K80
         bne mms80
-        lda #6
+        lda #7
         sta MNN
         lda #<mtab
         sta MNPTR
         lda #>mtab
         sta MNPTRH
         rts
-mms80:  lda #7
+mms80:  lda #8
         sta MNN
         lda #<mtab80
         sta MNPTR
@@ -11166,7 +11839,7 @@ k40off: lda KOLDV               ; CHROUT back to the KERNAL
         and #239
         sta $D037
         jmp mmshut              ; clear and repaint the chat (40 columns)
-mtab80: .word mi0,mi1,mi2,mi3,mi4,mi40,mi5
+mtab80: .word mi0,mi1,mi2,mi3,mi4,miset,mi40,mi5
 mi40:   .text "40 column mode"
         .byte 0
 
@@ -11283,7 +11956,7 @@ kfo1:   ldx KFI
         ldy #0
         jsr kaddr
         ldy #0
-kfo2:   lda (PTR),y
+kfo2:   jsr kfrd6           ; a rule's left half is drawn plain
         sta $D03B
         iny
         cpy #40
@@ -12679,18 +13352,22 @@ def assemble4(src1, src2, src3, src4):
     """Five segments that call each other; placeholders settle in a few passes.
     Segment 5's bytes are left in SEG5 (the return value stays four code
     blocks, as every test harness expects)."""
-    global SEG5
+    global SEG5, SEG6, SEG7
     def labels(src):
         return [p[0] for p in (parse(l) for l in src.splitlines()) if p and p[0]]
     labels2, labels3, labels4, labels5 = labels(src2), labels(src3), labels(src4), labels(SRC5)
-    others = set(labels2) | set(labels3) | set(labels4) | set(labels5)
+    labels6 = labels(SRC6)
+    labels7 = labels(SRC7)
+    others = set(labels2) | set(labels3) | set(labels4) | set(labels5) | set(labels6) | set(labels7)
     src1 = src1 + "\ns2img:\n"
     s2 = {n: S2ORG for n in labels2}
     s3 = {n: S3ORG for n in labels3}
     s4 = {n: S4ORG for n in labels4}
     s5 = {n: S5ORG for n in labels5}
+    s6 = {n: S6ORG for n in labels6}
+    s7 = {n: S7ORG for n in labels7}
     eq1 = dict(EQU)
-    for d in (s2, s3, s4, s5):
+    for d in (s2, s3, s4, s5, s6, s7):
         eq1.update(d)
     eq1["S2PG"] = 1
     eq1["S4PG"] = 1
@@ -12698,30 +13375,38 @@ def assemble4(src1, src2, src3, src4):
     for _ in range(8):
         code1, syms1 = assemble(src1, ORG, eq1)
         base = {k: v for k, v in syms1.items() if k not in others}
-        eq2 = dict(base); eq2.update(s3); eq2.update(s4); eq2.update(s5)
+        eq2 = dict(base); eq2.update(s3); eq2.update(s4); eq2.update(s5); eq2.update(s6); eq2.update(s7)
         code2, syms2 = assemble(src2, S2ORG, eq2)
         s2 = {n: syms2[n] for n in labels2}
-        eq3 = dict(base); eq3.update(s2); eq3.update(s4); eq3.update(s5)
+        eq3 = dict(base); eq3.update(s2); eq3.update(s4); eq3.update(s5); eq3.update(s6); eq3.update(s7)
         code3, syms3 = assemble(src3, S3ORG, eq3)
         s3 = {n: syms3[n] for n in labels3}
-        eq4 = dict(base); eq4.update(s2); eq4.update(s3); eq4.update(s5)
+        eq4 = dict(base); eq4.update(s2); eq4.update(s3); eq4.update(s5); eq4.update(s6); eq4.update(s7)
         code4, syms4 = assemble(src4, S4ORG, eq4)
         s4 = {n: syms4[n] for n in labels4}
-        eq5 = dict(base); eq5.update(s2); eq5.update(s3); eq5.update(s4)
+        eq5 = dict(base); eq5.update(s2); eq5.update(s3); eq5.update(s4); eq5.update(s6); eq5.update(s7)
         code5, syms5 = assemble(SRC5, S5ORG, eq5)
         s5 = {n: syms5[n] for n in labels5}
+        eq6 = dict(base); eq6.update(s2); eq6.update(s3); eq6.update(s4); eq6.update(s5); eq6.update(s7)
+        code6, syms6 = assemble(SRC6, S6ORG, eq6)
+        s6 = {n: syms6[n] for n in labels6}
+        eq7 = dict(base); eq7.update(s2); eq7.update(s3); eq7.update(s4); eq7.update(s5); eq7.update(s6)
+        code7, syms7 = assemble(SRC7, S7ORG, eq7)
+        s7 = {n: syms7[n] for n in labels7}
         eq1 = dict(EQU)
-        for d in (s2, s3, s4, s5):
+        for d in (s2, s3, s4, s5, s6, s7):
             eq1.update(d)
         eq1["S2PG"] = (len(code2) + 255) // 256
         eq1["S4PG"] = (len(code4) + 255) // 256
-        if (code1, code2, code3, code4, code5) == prev:
+        if (code1, code2, code3, code4, code5, code6, code7) == prev:
             allsyms = dict(syms1)
-            for d in (syms2, syms3, syms4, syms5):
+            for d in (syms2, syms3, syms4, syms5, syms6, syms7):
                 allsyms.update(d)
             SEG5 = bytes(code5)
+            SEG6 = bytes(code6)
+            SEG7 = bytes(code7)
             return code1, allsyms, code2, code3, code4
-        prev = (code1, code2, code3, code4, code5)
+        prev = (code1, code2, code3, code4, code5, code6, code7)
     raise ValueError("segments did not settle")
 
 
@@ -12825,6 +13510,12 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
     # are $9960-$9AFF (main copies Y = $60.. of the first, all of the second)
     prg += bytes(256 * ((len(code4) + 255) // 256) - len(code4))
     prg += bytes(S5ORG - 0x9900) + SEG5 + bytes(S5IMGEND - S5ORG - len(SEG5))
+    if S6ORG + len(SEG6) > S6MAX:
+        raise ValueError("segment 6 is %d bytes: past $%04X" % (len(SEG6), S6MAX))
+    prg += bytes(S6ORG - 0x6200) + SEG6 + bytes(S6MAX - S6ORG - len(SEG6))   # main copies these 6 pages to $6200, from $80 on
+    if S7ORG + len(SEG7) > S7MAX:
+        raise ValueError("segment 7 is %d bytes: past $%04X" % (len(SEG7), S7MAX))
+    prg += bytes(S7ORG - 0x0300) + SEG7 + bytes(S7MAX - S7ORG - len(SEG7))   # one page, from $40 on
     with open(out, "wb") as f:
         f.write(prg)
     return code, syms, prg, bit, half

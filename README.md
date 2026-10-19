@@ -1,7 +1,7 @@
 # MeshCore 64
 
 **A Commodore 64 chat client for the [MeshCore](https://github.com/meshcore-dev/MeshCore) LoRa mesh.**
-Version 2.0.2. Machine language, 5760 baud, all of it running on a stock C64.
+Version 2.1. Machine language, 5760 baud, all of it running on a stock C64.
 
 <p align="center"><img src="docs/images/meshcore64-demo.gif" alt="MeshCore 64 in action" width="768"></p>
 
@@ -44,7 +44,12 @@ radio if it is behind. Restored history is painted back under the boot text.
 <img src="docs/images/03-chat.png" width="576">
 
 Every sender gets a colour of their own, and it is the same colour every time, live or in
-history. A rule separates messages. The prompt shows the channel and, after the `+`, how many
+history. A rule separates messages, and **the time of each message sits on the rule above it**
+(light grey, at the right): `09:41` for today, `Sat 17 Oct 22:58` for anything older. It is your
+local time when the C64 knows the time zone (an Ultimate's clock), otherwise UTC. The time is the
+sender's; if their clock is missing or far ahead of the mesh, it is the time the message arrived.
+A new message is announced by the **SID**: a short blip for a channel, a rising two-note chime for
+a direct message (both can be turned off, see Settings). The prompt shows the channel and, after the `+`, how many
 messages are waiting on other channels: `Public +15>`.
 
 What you type is **white** until it is sent. It turns **yellow** when the radio has taken it, and
@@ -60,7 +65,7 @@ You can type up to 135 characters; long lines wrap cleanly.
 <img src="docs/images/04-menu.png" width="576"> <img src="docs/images/05-channels.png" width="576">
 
 **F1** opens the menu over the conversation: Channels, Nodes, Stats, Radio actions, Add/remove
-channel. The channel list shows unread counts and a star where you are. Pick with the digit keys
+channel, Settings. The channel list shows unread counts and a star where you are. Pick with the digit keys
 or the cursor keys.
 
 ### Nodes
@@ -108,6 +113,8 @@ just steps to the next channel, so you can cycle through them all.
 **F5** scrolls back through everything the REU or GeoRAM has kept (the border turns red while you
 are in history); F5 again goes further back, F7 comes forward, any other key returns to live.
 After a reset the history is still there: the start screen says "REU detected ... restored".
+Every channel and DM conversation that gets messages has its own history; up to eight are kept
+at a time, and when a ninth needs room the one that has been quiet longest is recycled.
 
 ### Stats
 
@@ -131,6 +138,14 @@ send an advert (zero hop or flood). And **Purge old nodes...**: type a number of
 reads the radio's node list and removes every node it has not heard from in that long (favourites
 are always kept), then tells you how many it checked and removed. The radio keeps nodes
 forever until it is full, so this is how you keep the list tidy.
+
+### Settings
+
+<img src="docs/images/21-settings.png" width="576">
+
+**Sound**: `all` (every message), `DMs` (direct messages only) or `off`. **Timestamps**: `on` or
+`off`. RETURN changes the highlighted one (changing the sound plays it); they are kept with the
+saved session on an REU or GeoRAM.
 
 ### Add a channel
 
@@ -175,11 +190,11 @@ that still works. MeshCore 64 reads the channels that are on the radio and can a
 
 | file | how |
 |---|---|
-| `meshcore64-v2.0.2.prg` | load it from anything: an Ultimate, SD2IEC, `LOAD"*",8,1` and `RUN` |
-| `meshcore64-v2.0.2.d64` | a disk image: `LOAD"MESHCORE64",8` then `RUN` |
-| `meshcore64-v2.0.2.crt` | a cartridge image (Magic Desk, 64K): runs the moment you switch on |
-| `meshcore64-v2.0.2.bin` | the same cartridge as a flat 64K image for a **27C512** EPROM |
-| `meshcore64-ez-v2.0.2.crt` | **MeshCore 64 EZ**: the same program on an **EasyFlash** cartridge ([details](#meshcore-64-ez-easyflash)) |
+| `meshcore64-v2.1.prg` | load it from anything: an Ultimate, SD2IEC, `LOAD"*",8,1` and `RUN` |
+| `meshcore64-v2.1.d64` | a disk image: `LOAD"MESHCORE64",8` then `RUN` |
+| `meshcore64-v2.1.crt` | a cartridge image (Magic Desk, 64K): runs the moment you switch on |
+| `meshcore64-v2.1.bin` | the same cartridge as a flat 64K image for a **27C512** EPROM |
+| `meshcore64-ez-v2.1.crt` | **MeshCore 64 EZ**: the same program on an **EasyFlash** cartridge ([details](#meshcore-64-ez-easyflash)) |
 
 The cartridge copies the program into RAM and starts it, so after that it is the same program.
 Every format is **the same program**: the PRG, the D64, both cartridge images and the EasyFlash image all
@@ -188,12 +203,12 @@ PRG, D64 and Magic Desk cartridge detect both). The cartridge is only a differen
 
 ### Making a cartridge
 
-**Ultimate II+ and similar:** copy `meshcore64-v2.0.2.crt` to the device and run it. Nothing to build.
+**Ultimate II+ and similar:** copy `meshcore64-v2.1.crt` to the device and run it. Nothing to build.
 
-**Your own EPROM cartridge:** burn `meshcore64-v2.0.2.bin` to a **27C512** (64K). It is one flat image,
+**Your own EPROM cartridge:** burn `meshcore64-v2.1.bin` to a **27C512** (64K). It is one flat image,
 the eight 8K banks end to end, and the unused tail is `$FF` (erased state). The `.crt` is the same
 contents in the container emulators expect: it is **Magic Desk** (cartridge type 19), so VICE
-runs it too (`x64sc -cartcrt meshcore64-v2.0.2.crt`).
+runs it too (`x64sc -cartcrt meshcore64-v2.1.crt`).
 
 | | |
 |---|---|
@@ -224,7 +239,7 @@ the program.
 
 ### MeshCore 64 EZ (EasyFlash)
 
-**`meshcore64-ez-v2.0.2.crt`** is MeshCore 64 2.0.2 for an **EasyFlash** cartridge (CRT type 32), such as an
+**`meshcore64-ez-v2.1.crt`** is MeshCore 64 2.1 for an **EasyFlash** cartridge (CRT type 32), such as an
 EasyFlash 3, or for an Ultimate II+ running an EasyFlash cartridge image. It is the same program,
 byte for byte, as the cartridge build above; only the cartridge wrapper differs. Nothing in the
 program changed and it never writes to the flash.
@@ -280,7 +295,7 @@ Everything is built by Python scripts; there are no other dependencies than VICE
 `c1541` for the cartridge and disk images.
 
 ```bash
-src/build.sh            # -> release/meshcore64-v2.0.2.{prg,crt,bin,d64}; byte-identical to the published files
+src/build.sh            # -> release/meshcore64-v2.1.{prg,crt,bin,d64}; byte-identical to the published files
 pip install py65
 src/tests/run-sims.sh   # the 6502 simulator suites
 ```
@@ -288,7 +303,7 @@ src/tests/run-sims.sh   # the 6502 simulator suites
 [`src/tests/fakeradio.py`](src/tests/fakeradio.py) is a MeshCore radio simulator for VICE (set
 `-rsuserdev 0 -rsdev1 127.0.0.1:25232`); [`src/tests/run-vice.sh`](src/tests/run-vice.sh) shows how the
 screenshots above were made. The program is a single readable file, [`src/meshcore64.py`](src/meshcore64.py),
-with its own assembler; it is laid out in five code areas that fit the C64's 64K around the buffers.
+with its own assembler; it is laid out in seven code areas that fit the C64's 64K around the buffers.
 
 ## Tested
 
@@ -296,12 +311,14 @@ with its own assembler; it is laid out in five code areas that fit the C64's 64K
 - VICE (NTSC and PAL): boot of every format, and long runs with several hundred messages, adverts and
   repeats on no expansion, an REU and a GeoRAM, with a scripted radio. No crashes, and the link error counter
   stays at 0-2 per run.
-- 6502 simulators for the receiver timing, the menus, 80-column reflow, routes, F7, the purge, the stats.
+- 6502 simulators for the receiver timing, the menus, 80-column reflow, routes, F7, the purge, the stats,
+  timestamps and the alert, and the history regions across restarts (with GeoRAM and REU models).
 
 Known limits: the 80-column mode needs a Kawari whose firmware has its 80-column mode (the same one Novaterm's
 80-column driver uses). A message at the full 135 characters may be refused by the radio; the client
-then says "the radio refused that message". The radio keeps at most 350 nodes; the C64 holds up to 255
-(96 without expansion memory), so purge old nodes now and then.
+then says "the radio refused that message". The radio keeps at most 350 nodes; the C64 holds up to 234
+(96 without expansion memory), so purge old nodes now and then. The time of a message you sent appears on its rule at the next
+repaint (switching channel, F5), not at once.
 
 ## Credits
 

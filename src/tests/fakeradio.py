@@ -101,11 +101,19 @@ def curr_time() -> bytes:
         return bytes([RESP_CURR_TIME]) + struct.pack("<I", int(RADIO_T0 + time.time() - RADIO_START))
     return bytes([RESP_CURR_TIME]) + struct.pack("<I", int(time.time()))
 
+_NMSG = [0]
+def msg_ts():
+    """The message's timestamp: now. MC64_TSSPREAD=s (screenshots): the first 40 messages
+    (MC64_TSN, default 40) are dated s seconds apart, ending at now, so the history shows believable times."""
+    sp = int(os.environ.get("MC64_TSSPREAD", "0"))
+    _NMSG[0] += 1
+    return int(time.time()) - max(0, int(os.environ.get("MC64_TSN", "40")) - _NMSG[0]) * sp
+
 def chan_msg(text: bytes, chan: int = 0) -> bytes:
     p = bytearray()
     # op,snr,res,res,chan_idx,path_len,txt_type -- chan_idx is byte 4
     p += bytes([RESP_CHANNEL_MSG_V3, 20, 0, 0, chan, 255, 0])
-    p += struct.pack("<I", int(time.time()))
+    p += struct.pack("<I", msg_ts())
     # the firmware prepends "<sender>: " into the text itself
     # (BaseChatMesh::sendGroupMessage), so the client must NOT add its own
     p += text                                                 # text at offset 11
@@ -131,7 +139,7 @@ def dm_msg(text: bytes, contact_n: int = 1) -> bytes:
     p += bytes([RESP_CONTACT_MSG_V3, 20, 0, 0])
     p += key
     p += bytes([255, 0])                       # path_len, TXT_TYPE_PLAIN
-    p += struct.pack("<I", int(time.time()))
+    p += struct.pack("<I", msg_ts())
     p += text
     return bytes(p)
 
@@ -285,7 +293,12 @@ class Radio:
             idx = p[1] if len(p) > 1 else 0
             nm = CHANNELS.get(idx, b"").decode() or "(empty)"
             self.log.append(f"   [GET_CHANNEL {idx} -> {nm}]")
-            self.send(channel_info(idx))
+            # MC64_DROPCH=n: the first reply for slot n is lost on the way (a corrupt frame)
+            if os.environ.get("MC64_DROPCH") == str(idx) and not getattr(self, "dropped", False):
+                self.dropped = True
+                self.log.append("   [reply DROPPED]")
+            else:
+                self.send(channel_info(idx))
         elif op == 4:   # CMD_GET_CONTACTS
             if not hasattr(self, "list_at"):
                 self.list_at = getattr(self, "nsync", 0)

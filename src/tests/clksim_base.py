@@ -25,6 +25,10 @@ class M:
                 self.mem[mod.S3ORG + i] = b
         if hasattr(mod, "S4ORG"):        # segment 4: as main copies it after the splash
             tail4 = prg[2 + (mod.S4IMG - mod.ORG):]
+            if getattr(mod, "SEG7", b""):   # v2.1: segment 7's page closes the image
+                tail4 = tail4[:-256]
+            if getattr(mod, "SEG6", b""):   # v2.1: then segment 6's pages
+                tail4 = tail4[:-(mod.S6MAX - mod.S6ORG)]
             if hasattr(mod, "SEG5"):     # the last 512 bytes are segment 5's pages
                 tail4 = tail4[:-(getattr(mod, 'S5IMGEND', getattr(mod, 'S5MAX', 0x9B00)) - 0x9900)]
             for i, b in enumerate(tail4):
@@ -32,6 +36,12 @@ class M:
         if getattr(mod, "SEG5", b""):    # segment 5, as main copies it to $9960
             for i, b in enumerate(mod.SEG5):
                 self.mem[mod.S5ORG + i] = b
+        if getattr(mod, "SEG6", b""):    # segment 6, as main copies it to $6300
+            for i, b in enumerate(mod.SEG6):
+                self.mem[mod.S6ORG + i] = b
+        if getattr(mod, "SEG7", b""):    # segment 7, as main copies it to $0340
+            for i, b in enumerate(mod.SEG7):
+                self.mem[mod.S7ORG + i] = b
         self.uci = uci_text
         self.mem.subscribe_to_read(range(0xDF1C, 0xDF20), self.rd)
         self.mem.subscribe_to_write(range(0xDF1C, 0xDF20), self.wr)

@@ -1,31 +1,43 @@
-# MeshCore 64 v2.0.2
+# MeshCore 64 v2.1
 
-**More nodes, and the lists no longer reload.**
+**New**
 
-- With an REU or GeoRAM/NeoRAM the C64 now holds **255 nodes** (96 without expansion memory; it was 160 / 96).
-  The extra room is RAM that sat idle.
-- When the table is full the **newest nodes are kept**: every node remembers when it was last heard, and a
-  newer one replaces the oldest instead of being dropped. The list title says "newest" then, e.g. "Companions (85) newest".
-- Node lists are always marked as loaded, so a full table never forces a reload. After a restart with an REU or
-  GeoRAM the saved node table is used as it is; otherwise **all node types load in the background** a few seconds
-  after start (one pass instead of one per list). R in a list still refreshes it.
-- A list shows at most 128 rows; node names are kept to 23 characters.
-- F7 is labelled "channels".
-- **First start after the update:** the node format changed, so a node table saved by an older version is dropped once and
-  reloaded. Channel history is kept.
-- Every format is still the same program. The radio firmware is unchanged (5760 baud).
+- **Timestamps.** Each message's time sits on the rule above it, in light grey: `09:41` today,
+  `Sat 17 Oct 22:58` for older ones. Local time when the time zone is known (Ultimate II+ clock),
+  otherwise UTC. The sender's clock is used; when it is missing or far ahead, the time the message arrived.
+  In 80 columns the time is at the right end of the rule.
+- **Alert sound.** The SID plays a short blip for a channel message and a rising two-note chime for a DM.
+- **F1 > Settings.** Sound: all / DMs / off. Timestamps: on / off. Kept with the saved session (REU / GeoRAM).
+
+**Fixed**
+
+- **Switching channels showed another channel's messages.** Only channels 0-5 had their own history;
+  every channel from slot 6 up shared one, and all DM conversations shared another. Now each channel or
+  DM that gets messages has its own (up to eight at a time; the quietest is recycled when a ninth needs one).
+- **The channel scan at start could hang** if one reply from the radio was lost on a busy mesh: unrelated
+  traffic kept restarting its timeout, and keys were ignored. The timeout now runs from the request, and a
+  slot whose reply is lost is asked for again.
+
+**Changed**
+
+- The C64 holds up to 234 nodes with an REU or GeoRAM (was 255): the room went to the new code. 96 without.
+- First start after the update: the node list reloads once in the background. Channels 0-5 keep their
+  history; the old shared histories (channels 6 and up, DMs) start empty.
+
+The radio firmware is unchanged (5760 baud).
 
 The C64 client for MeshCore, rewritten in machine language with its own 5760-baud RS-232 driver.
 
 **Assets** (all four program formats, plus the radio firmware that must go with them):
 
-- `meshcore64-v2.0.2.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
+- `meshcore64-v2.1.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
 - `firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin` (flash at 0x0), `...-app.bin`, and the source patch
 
 **Highlights**
 
 - 5760 baud on a stock C64, PAL and NTSC, with the C64's screen on
 - Channels, direct messages (a DM conversation lives in the channel list), nodes (companions, repeaters, room servers, sensors), login, telemetry, routes, radio settings
+- Timestamps on every message, an SID alert for new messages and DMs, F1 > Settings
 - Sent-message status in colour: white while typing, yellow sent, green when acked or repeated
 - F7 jumps to the next channel with new messages; F5 scrolls back through history
 - REU and GeoRAM/NeoRAM: history, node and channel lists, saved sessions that survive a reset (NeoRAM: a power-off)

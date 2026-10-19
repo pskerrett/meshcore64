@@ -75,7 +75,7 @@ def rdio(a):
 m.mem.subscribe_to_read(range(0xD000, 0xE000), rdio)
 m.mem.subscribe_to_write(range(0xD035, 0xD040), lambda a, v: k.wr(a, v))
 # KERNAL: CHROUT jumps through $0326; the "40 column" output just counts
-KOUT = 0x0340
+KOUT = 0x02A8
 kernal40 = []
 m.mem[0xFFD2:0xFFD5] = [0x6C, 0x26, 0x03]
 m.mem[KOUT] = 0x60
@@ -94,7 +94,7 @@ for i in range(1000): m.mem[0xD800 + i] = 14
 m.mem[214] = 6
 
 m.call("mmsel2")
-check("no Kawari yet: the usual 6 items", m.mem[E["MNN"]] == 6)
+check("no Kawari yet: the usual 7 items", m.mem[E["MNN"]] == 7)
 m.call("kwboot")
 check("Kawari detected: KWOK set, 80 columns on", m.mem[syms["KWOK"]] == 1 and m.mem[syms["K80"]] == 1)
 def items():
@@ -107,21 +107,21 @@ def items():
         out.append(bytes(b).decode())
     return out
 m.call("mmsel2")
-check("80: '40 column mode' above close", items()[5:] == ["40 column mode", "Close"])
+check("80: '40 column mode' above close", items()[5:] == ["Settings", "40 column mode", "Close"])
 m.mem[syms["mmshut"]] = 0x60
 m.call("mmcol")
-check("item 5 in 80 -> 40 columns", m.mem[syms["K80"]] == 0 and k.r[0xD037] & 16 == 0)
+check("item 6 in 80 -> 40 columns", m.mem[syms["K80"]] == 0 and k.r[0xD037] & 16 == 0)
 m.call("mmsel2")
-check("40 with a Kawari: '80 column mode' above close", items()[5:] == ["80 column mode", "Close"])
+check("40 with a Kawari: '80 column mode' above close", items()[5:] == ["Settings", "80 column mode", "Close"])
 m.call("mmcol")
 vec = m.mem[0x0326] | m.mem[0x0327] << 8
-check("item 5 in 40 -> 80 columns again, hooked", m.mem[syms["K80"]] == 1 and k.r[0xD037] & 16 == 16 and vec == syms["k80out"])
+check("item 6 in 40 -> 80 columns again, hooked", m.mem[syms["K80"]] == 1 and k.r[0xD037] & 16 == 16 and vec == syms["k80out"])
 check("the KERNAL vector kept for later", (m.mem[syms["KOLDV"]] | m.mem[syms["KOLDV"] + 1] << 8) == KOUT)
 m.call("mmsel2")
-check("and the menu offers 40 again", items()[5:] == ["40 column mode", "Close"])
+check("and the menu offers 40 again", items()[5:] == ["Settings", "40 column mode", "Close"])
 m.mem[syms["KWOK"]] = 0; m.call("mmcol")
 m.call("mmsel2")
-check("without a Kawari: 6 items in 40", m.mem[E["MNN"]] == 6 and m.mem[syms["K80"]] == 0)
+check("without a Kawari: 7 items in 40", m.mem[E["MNN"]] == 7 and m.mem[syms["K80"]] == 0)
 # ---- F3 ----
 m.mem[syms["KWOK"]] = 1
 k80 = m.mem[syms["K80"]]
