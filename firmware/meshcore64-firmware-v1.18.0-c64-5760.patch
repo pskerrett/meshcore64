@@ -1,0 +1,59 @@
+diff --git a/examples/companion_radio/main.cpp b/examples/companion_radio/main.cpp
+index 839d4958..225d2050 100644
+--- a/examples/companion_radio/main.cpp
++++ b/examples/companion_radio/main.cpp
+@@ -80,7 +80,10 @@ MultiSerialInterface interface_manager;
+ #if defined(SERIAL_RX)
+   #include <helpers/ArduinoSerialInterface.h>
+   ArduinoSerialInterface hardware_serial_interface;
+-  HardwareSerial companion_serial(1);
++  #ifndef HW_SERIAL_UART_NUM
++    #define HW_SERIAL_UART_NUM 1
++  #endif
++  HardwareSerial companion_serial(HW_SERIAL_UART_NUM);
+ #endif
+ 
+ // platform file system
+@@ -132,6 +135,10 @@ void halt() {
+   bool wifi_enabled = false;   // set at boot from prefs; false also when the effective SSID is blank
+ #endif
+ 
++#ifndef HW_SERIAL_BAUD_RATE
++  #define HW_SERIAL_BAUD_RATE 115200
++#endif
++
+ void setup() {
+   Serial.begin(115200);
+   board.begin();
+@@ -268,8 +275,7 @@ void setup() {
+ 
+ // add hardware serial interface
+ #if defined(SERIAL_RX)
+-  companion_serial.setPins(SERIAL_RX, SERIAL_TX);
+-  companion_serial.begin(115200);
++  companion_serial.begin(HW_SERIAL_BAUD_RATE, SERIAL_8N1, SERIAL_RX, SERIAL_TX);
+   hardware_serial_interface.begin(companion_serial);
+   interface_manager.addInterface(InterfaceType::HardwareSerial, &hardware_serial_interface);
+ #endif
+diff --git a/variants/heltec_v3/platformio.ini b/variants/heltec_v3/platformio.ini
+index 06c02856..fa80beb2 100644
+--- a/variants/heltec_v3/platformio.ini
++++ b/variants/heltec_v3/platformio.ini
+@@ -182,6 +182,17 @@ lib_deps =
+   ${Heltec_lora32_v3.lib_deps}
+   densaugeo/base64 @ ~1.4.0
+ 
++[env:Heltec_v3_companion_radio_ble_5760]
++; meshcore64: the stock BLE companion, plus the C64 user-port link on UART 2 at 5760 baud.
++extends = env:Heltec_v3_companion_radio_ble
++build_flags =
++  ${env:Heltec_v3_companion_radio_ble.build_flags}
++  -D SERIAL_RX=45
++  -D SERIAL_TX=46
++  -D HW_SERIAL_BAUD_RATE=5760
++  -D HW_SERIAL_UART_NUM=2
++  -D FIRMWARE_VERSION='"v1.18.0-c64-5760"'
++
+ [env:Heltec_v3_companion_radio_wifi]
+ extends = Heltec_lora32_v3
+ build_flags =
