@@ -1,43 +1,22 @@
 # MeshCore 64 v2.2
 
-**New since v2.1**
+This release includes everything new since v2.0.2, which covers v2.1 and v2.2.
 
-- **F1 > Live dump.** Shows every packet the radio hears: time, type, route, hops, RSSI/SNR, size, to/from or
+**New**
+
+- **F1 > Live dump.** Every packet the radio hears: time, type, route, hops, RSSI/SNR, size, to/from or
   channel hash, advert key/kind/name, transport code and path. Full 80 column screen in 80 column mode.
   Keys: SPACE pause, P payload rows as hex + text, T type filter, F1 / RUN-STOP back.
 - **Cartridge lamps.** All six: a sweep when a message comes in, a double flash when one is sent, back-and-forth
   when a repeater sent yours on, and the unread count in binary when idle, on every screen.
-- **F1 > Stats** shows the program version and the radio firmware.
-- **Radio actions > Path hash** sets 1, 2 or 3-byte path hashes (RETURN steps; saved on the radio).
-
-**Fixed**
-
-- A quote byte in a packet no longer scrambles the colours.
-
-The radio firmware is unchanged (5760 baud). This is a test build: the new screens are tested in VICE and on
-the author's hardware, but the EasyFlash image is still VICE-only.
-
-The C64 client for MeshCore, rewritten in machine language with its own 5760-baud RS-232 driver.
-
-**Assets**
-
-- `meshcore64-v2.2.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
-- `meshcore64-ez-v2.2.crt` (EasyFlash)
-- `firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin` (flash at 0x0), `...-app.bin`
-
-Radio and client must both be the 5760 versions. Full documentation: README.
-
----
-
-## Earlier: v2.1
-**New**
-
 - **Timestamps.** Each message's time sits on the rule above it, in light grey: `09:41` today,
   `Sat 17 Oct 22:58` for older ones. Local time when the time zone is known (Ultimate II+ clock),
   otherwise UTC. The sender's clock is used; when it is missing or far ahead, the time the message arrived.
   In 80 columns the time is at the right end of the rule.
 - **Alert sound.** The SID plays a short blip for a channel message and a rising two-note chime for a DM.
 - **F1 > Settings.** Sound: all / DMs / off. Timestamps: on / off. Kept with the saved session (REU / GeoRAM).
+- **F1 > Stats** shows the program version and the radio firmware.
+- **Radio actions > Path hash** sets 1, 2 or 3-byte path hashes (RETURN steps; saved on the radio).
 
 **Fixed**
 
@@ -47,6 +26,7 @@ Radio and client must both be the 5760 versions. Full documentation: README.
 - **The channel scan at start could hang** if one reply from the radio was lost on a busy mesh: unrelated
   traffic kept restarting its timeout, and keys were ignored. The timeout now runs from the request, and a
   slot whose reply is lost is asked for again.
+- A quote byte in a packet no longer scrambles the colours.
 
 **Changed**
 
@@ -58,22 +38,10 @@ The radio firmware is unchanged (5760 baud).
 
 The C64 client for MeshCore, rewritten in machine language with its own 5760-baud RS-232 driver.
 
-**Assets** (all four program formats, plus the radio firmware that must go with them):
+**Assets**
 
-- `meshcore64-v2.1.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
-- `firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin` (flash at 0x0), `...-app.bin`, and the source patch
-
-**Highlights**
-
-- 5760 baud on a stock C64, PAL and NTSC, with the C64's screen on
-- Channels, direct messages (a DM conversation lives in the channel list), nodes (companions, repeaters, room servers, sensors), login, telemetry, routes, radio settings
-- Timestamps on every message, an SID alert for new messages and DMs, F1 > Settings
-- Sent-message status in colour: white while typing, yellow sent, green when acked or repeated
-- F7 jumps to the next channel with new messages; F5 scrolls back through history
-- REU and GeoRAM/NeoRAM: history, node and channel lists, saved sessions that survive a reset (NeoRAM: a power-off)
-- VIC-II Kawari: 80-column mode, F3 swaps 40/80
-- Ultimate II+ real-time clock: read at start, radio clock synchronised, offset in Stats
-- Purge nodes the radio has not heard from in N days
-- Stats: battery, link, clock offset, last message, memory
+- `meshcore64-v2.2.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
+- `meshcore64-ez-v2.2.crt` (EasyFlash)
+- `firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin` (flash at 0x0), `...-app.bin`
 
 Radio and client must both be the 5760 versions. Full documentation: README.
