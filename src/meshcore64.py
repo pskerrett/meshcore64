@@ -241,6 +241,8 @@ EQU = {
     # the radio panel needs ten once the two advert lines are in it.
     "LOGODAT": 0x6800,   # s14: splash RLE data, loaded here, read once
     "PLBUF":   0x9E40,
+    "LDBUF":   0x9CC0,   # Live dump: one packet's text, <= 496 bytes (NODETAB/NODEIX/PLSTAT: free while it runs)
+    "PLSTAT":  0x9E00,   # Stats: 14 lines from here (NODEIX's second half, rebuilt by ndview)
     "TSTR":    0x9FC0,   # s14: a time line being built, 40 bytes
     "PLTAB":   0xC840,   # pointer table -- must NOT sit inside PLBUF
     "PLBASE":  0xCFF0,   # which buffer plnew fills (2 bytes)
@@ -320,6 +322,19 @@ main:
 ; into that same RAM.
         lda #54                 ; $36: basic out, kernal and i/o in
         sta 1
+; Segment 8 (v2.2) goes under the KERNAL first: its image may reach past
+; $a000, which the segment 2 copy below overwrites. Writes always land in
+; RAM, so no banking is needed for the copy.
+        lda #0
+        sta PTR
+        sta PTR2
+        lda #S8IMGH
+        sta PTRH
+        lda #S8DSTH
+        sta PTR2H
+        ldx #S8PG
+        ldy #0
+        jsr pgcp
         lda #<s2img
         sta PTR
         lda #>s2img
@@ -444,7 +459,6 @@ bootru: jsr s2init              ; where contacts live depends on the reu
 
 loop:   jsr poll
         jsr kbd
-        jsr ledstep
         jsr tkey
         jsr chktik
         jsr ctsave
@@ -1093,7 +1107,7 @@ serini: sei
 ; transmit works perfectly, every handshake command goes out and is
 ; answered, and not one byte ever comes back. 120 = PB3-PB6 out for the
 ; lamps, everything else input, which hands RTS/DTR back.
-        lda #120
+        lda leddd           ; 120, or 126 with six lamps (v2.2, set by the build)
         sta C2DDRB
 
 ; install our nmi handler. the kernal's entry does SEI then JMP ($0318),
@@ -1312,7 +1326,7 @@ sfd:    lda #0
 SFY:    .byte 0
 
 ; ===== drain our ring and reassemble frames ============================
-poll:   jsr kmir                ; 80 columns: show the menu (s33)
+poll:   jsr pollhk              ; lamps (v2.2), then the 80 column menu copy (s33)
         jsr tick
         lda READY
         bne pdone
@@ -1935,14 +1949,6 @@ ucnow:  jsr ucget
         lda #1
         sta CLKSET
 ucn9:   rts
-ucrad:  ldx #3
-ucr1:   lda NOWTS,x
-        sta UCAC,x
-        dex
-        bpl ucr1
-        lda #<slrad
-        ldx #>slrad
-        jmp ckln
 ucsrt:  rts
 
 suclk:  .text "clock    "
@@ -3186,7 +3192,7 @@ dinf2:  cpx #19
         jmp dinf2
 dinf3:  lda #0
         sta FWVER,x
-        rts
+        jmp phsave              ; v2.1.1: and the path hash mode
 dwait:  jmp sync
 dmsg:   lda BUF+4
         cmp #40
@@ -4479,7 +4485,7 @@ mainmnu:
         sta MNY
         lda #24
         sta MNW
-        jsr mmsel2              ; 6 items, or 7 with "40/80 column mode"
+        jsr mmsel2              ; 8 items, or 9 with "40/80 column mode"
         lda #<mtitle
         sta MNTIT
         lda #>mtitle
@@ -4502,9 +4508,12 @@ mainmnu:
         beq mmadd
         cmp #5
         beq mmset
-        cmp #6                  ; "40/80 column mode", or "close"
+        cmp #6
+        beq mmlive
+        cmp #7                  ; "40/80 column mode", or "close"
         bne mmshut
         jmp mmcol
+mmlive: jmp ldump
 mmset:  jmp setpan
 mmshut: lda #147
         jsr CHROUT
@@ -4585,7 +4594,8 @@ caa4:   lda INPLEN
         lda CHNAME
         cmp #35                 ; '#'
         bne caa5
-        jsr hashch              ; SECBUF = sha256(CHNAME)[0:16], ~0.6 s
+        ldx #K8HASH             ; SECBUF = sha256(CHNAME)[0:16], ~0.6 s
+        jsr kcall               ; (segment 8 since v2.2: IRQs wait that long)
         jmp chsend
 caa5:   jsr inphx
         jmp chsend
@@ -5173,83 +5183,7 @@ tkrt:   lda JIFFY
 ; PB3-PB6 drive the lamps. Unlike the kernal's rs-232 we never touch PB1 or
 ; PB2 (RTS/DTR), so there is nothing to collide with -- the constraint that
 ; forced the old build to hand those pins back does not apply here.
-ledrx:  lda #0                  ; a ripple: the mesh is talking
-        sta LEDPAT
-        lda #0
-        sta LEDIX
-        lda #1
-        sta LEDON
-        rts
-ledtx:  lda #5                  ; all four at once: that one was ours
-        sta LEDPAT
-        lda #0
-        sta LEDIX
-        lda #1
-        sta LEDON
-        rts
-
-; Stepped once per jiffy from the main loop, so the animation is visible
-; without costing anything measurable.
-;
-; When nothing is flashing the lamps are not idle -- they show how many
-; messages are waiting, in binary, least significant on PB3. Four lamps
-; count to 15; past that it simply reads 15, which is still "a lot".
-ledstep:
-        lda LEDON
-        beq lsidle
-        lda JIFFY
-        cmp LEDJ
-        beq lsrt
-        sta LEDJ
-        lda LEDPAT
-        clc
-        adc LEDIX
-        tax
-        lda ledtab,x
-        cmp #255
-        beq lsend
-        sta C2PRB
-        inc LEDIX
-        rts
-lsend:  lda #0
-        sta LEDON
-        lda #255
-        sta LEDLST              ; force the count back onto the lamps
-; only written when the count changes, so the main loop is untouched the
-; rest of the time
-lsidle: lda UT
-        cmp LEDLST
-        beq lsrt
-        sta LEDLST
-        cmp #16
-        bcc lsi2
-        lda #15                 ; more than the lamps can show
-lsi2:   asl
-        asl
-        asl                     ; bit 0 -> PB3
-        sta C2PRB
-lsrt:   rts
-
-; ---- six lamps, when the pins are proven on real hardware ----
-; PB1 and PB2 carry two more, so the count reaches 63:
-;
-;       lda UT
-;       cmp #64
-;       bcc ls6
-;       lda #63
-; ls6:  asl                     ; bit 0 -> PB1
-;       sta C2PRB
-;
-; DDRB must become 126 as well as this changing, and that is the catch:
-; PB1 is RTS and PB2 is DTR, and VICE's userport rs232 drops the link the
-; moment either is driven -- so no emulator test can pass with it on. On
-; the real cart those two pins go to lamps with nothing listening, and
-; bit-zeal's meshtastic64 drives all six, so it should be fine. Should.
-; Untested on hardware, which is why it is commented out rather than
-; switched on.
-
-ledtab: .byte 48,72,48,0,255
-        .byte 120,120,0,120,120,0,255
+; (the lamp animation moved to segment 2 in v2.2: ledrx / ledtx / ledrep / ledstep)
 
 ; ===== boot lamp sweep =================================================
 ledboot:
@@ -6507,12 +6441,13 @@ bitpal: .byte 0,0,0,0
 bitntsc: .byte 0,0,0,0
 blankb: .byte 0
 geook:  .byte 1             ; 0 = never probe GeoRAM (cartridge build)
+leddd:  .byte 120           ; lamp pins: 126 = PB1-PB6 (release), 120 = PB3-PB6 (VICE tests)
 testk:  .byte 0             ; nonzero = run the scripted keypresses
 pyastart: .byte 1,0,0,0,0,0,0,0,67,54,52
 pyquery:  .byte 22,3
 pychan:   .byte 31,0
 pytime:   .byte 5
-banner: .text "meshcore 64  v2.1"
+banner: .text "meshcore 64  v2.2i"
         .byte 13,0
 svideo: .text "video    "
         .byte 0
@@ -6540,7 +6475,7 @@ mi4:    .text "Add/remove channel"
         .byte 0
 mi5:    .text "Close"
         .byte 0
-mtab:   .word mi0,mi1,mi2,mi3,mi4,miset,mi5
+mtab:   .word mi0,mi1,mi2,mi3,mi4,miset,milive,mi5
 ; one colour per entry: red, yellow, cyan, purple, light green, light blue
 mnclrs: .byte 2,7,3,4,13,14,2,7,3,4,13,14,2,7,3,4
 ; sender colours, chosen by name hash. No green -- that is the message --
@@ -6664,8 +6599,6 @@ skhz:   .text " kHz"
 shz:    .text " Hz"
         .byte 0
 sdbm:   .text " dBm"
-        .byte 0
-sreu:   .text "reu detected  "
         .byte 0
 twiped: .text "Route wiped - next msg floods"
         .byte 0
@@ -8761,6 +8694,144 @@ OFFSND: .byte 0                  ; alert: 0 every message, 1 DMs only, 2 off
 NOTS:   .byte 0                  ; 1 = no timestamps
 
 
+
+; ===== cartridge lamps (v2.2) ==========================================
+; PB1-PB6 = 2, 4 ... 64. Release builds drive all six (leddd = 126): our
+; serial driver uses only PB0 and PA2 and the radio has no flow control,
+; so on the cart RTS/DTR (PB1/PB2) go to lamps and nothing else. VICE's
+; userport RS-232 does watch them, so test builds keep 120 (PB3-PB6).
+; Stepped from poll -- every screen -- one byte per step, never a wait.
+ledrx:  lda #0                  ; a sweep: a message came in
+        .byte $2C               ; (BIT abs: skips the next lda)
+ledtx:  lda #8                  ; all six, twice: we sent one
+        .byte $2C
+ledrep: lda #18                 ; there and back: a repeater sent ours on
+        sta LEDPAT
+        lda #0
+        sta LEDIX
+        lda #1
+        sta LEDON
+        lda JIFFY               ; the first step on the next poll
+        sec
+        sbc #3
+        sta LEDJ
+        rts
+; when nothing is flashing the lamps show the unread count in binary
+ledstep:
+        lda LEDON
+        beq lsidle
+        lda JIFFY
+        sec
+        sbc LEDJ
+        cmp #3                  ; each step ~50 ms
+        bcc lsrt
+        lda JIFFY
+        sta LEDJ
+        stx LEDSX
+        lda LEDPAT
+        clc
+        adc LEDIX
+        tax
+        lda ledtab,x
+        ldx LEDSX
+        cmp #255
+        beq lsend
+        and leddd               ; only the pins this build drives
+        sta C2PRB
+        inc LEDIX
+        rts
+lsend:  lda #0
+        sta LEDON
+        lda #255
+        sta LEDLST              ; put the count back
+lsidle: lda UT
+        cmp LEDLST
+        beq lsrt
+        sta LEDLST
+        cmp #64
+        bcc lsi2
+        lda #63                 ; more than six lamps can count
+lsi2:   asl                     ; bit 0 -> PB1
+        and leddd
+        sta C2PRB
+lsrt:   rts
+ledtab: .byte 2,4,8,16,32,64,0,255
+        .byte 126,126,126,0,0,126,126,126,0,255
+        .byte 64,32,16,8,4,2,4,8,16,32,64,0,255
+LEDSX:  .byte 0
+; poll's first call: the lamps, then the 80 column menu copy
+pollhk: jsr ledstep
+        jmp kmir
+; main loop: end a flash after ~0.25 s
+flrest: lda PN_FS
+        bmi flrt
+        lda $A2
+        sec
+        sbc PN_FT
+        cmp #15
+        bcc flrt
+        jmp pnrest
+flrt:   rts
+
+; ===== F1 > Live dump (v2.2) ===========================================
+; Every packet the radio hears (PUSH_LOG_RX_DATA, $88), decoded as it
+; arrives. Segment 8 does the decoding into LDBUF (ldini / ldpkt / ldkey);
+; this loop polls, prints LDBUF and reads keys. Messages still arrive and
+; are kept exactly as they are under any panel (UIMODE 1).
+ldump:  lda #1
+        sta UIMODE
+        jsr k80c                ; 80 columns: the real 80 column screen, not
+        ldx #K8LDINI            ; the menu's 40 column mirror (K40)
+        jsr ldcall
+ldl:    jsr poll
+        lda READY
+        beq ldk
+        lda BUF
+        cmp #$88
+        bne ldd
+        lda TSOK                ; the line's time, made out here: the
+        beq ldt                 ; divisions are too slow for IRQs off
+        ldx #3
+ldt1:   lda NOWTS,x
+        sta UCAC,x
+        dex
+        bpl ldt1
+        jsr tsloc
+        jsr tsl0                ; TSTR+11 = "hh:mm:ss"
+ldt:    ldx #K8LDPKT
+        jsr ldcall
+ldd:    jsr dispat
+        lda #0
+        sta READY
+ldk:    jsr GETIN
+        cmp #0
+        beq ldl
+        tay
+        ldx #K8LDKEY
+        jsr ldcall
+        lda LDEXIT
+        beq ldl
+        lda #0
+        sta UIMODE
+        jmp mmshut
+ldcall: jsr kcall
+        lda #<LDBUF             ; up to 496 bytes: prtstr stops at 255
+        sta PTR
+        lda #>LDBUF
+        sta PTRH
+ldpr:   ldy #0
+        lda (PTR),y
+        beq ldprx
+        jsr CHROUT
+        inc PTR
+        bne ldpr
+        inc PTRH
+        bne ldpr
+ldprx:  rts
+LDEXIT: .byte 0
+milive: .text "Live dump"
+        .byte 0
+
 ; ===== radio configuration =============================================
 ; Each line renders the live value; RETURN on it steps to the next preset.
 ; "apply" writes them to the node.
@@ -8778,12 +8849,9 @@ radiovw:
         jsr rvseed
 rvdraw: jsr plinit
 ; --- frequency, shown in MHz from a kHz value ---
-        jsr plnew
         lda #<srfreq
-        sta SPL
-        lda #>srfreq
-        sta SPH
-        jsr plstr
+        ldx #>srfreq
+        jsr stl
         lda RFREQ
         sta NUML
         lda RFREQ+1
@@ -8794,18 +8862,12 @@ rvdraw: jsr plinit
         sta NUM3
         jsr pldec
         lda #<skhz
-        sta SPL
-        lda #>skhz
-        sta SPH
-        jsr plstr
-        jsr plend
+        ldx #>skhz
+        jsr stend
 ; --- bandwidth ---
-        jsr plnew
         lda #<srbw
-        sta SPL
-        lda #>srbw
-        sta SPH
-        jsr plstr
+        ldx #>srbw
+        jsr stl
         lda RBW
         sta NUML
         lda RBW+1
@@ -8816,98 +8878,70 @@ rvdraw: jsr plinit
         sta NUM3
         jsr pldec
         lda #<shz
-        sta SPL
-        lda #>shz
-        sta SPH
-        jsr plstr
-        jsr plend
+        ldx #>shz
+        jsr stend
 ; --- spreading factor ---
-        jsr plnew
         lda #<srsf
-        sta SPL
-        lda #>srsf
-        sta SPH
-        jsr plstr
+        ldx #>srsf
+        jsr stl
         lda RSF
-        sta NUML
-        lda #0
-        sta NUMH
-        sta NUM2
-        sta NUM3
-        jsr pldec
+        ldx #0
+        jsr stnum
         jsr plend
 ; --- coding rate ---
-        jsr plnew
         lda #<srcr
-        sta SPL
-        lda #>srcr
-        sta SPH
-        jsr plstr
+        ldx #>srcr
+        jsr stl
         lda RCR
-        sta NUML
-        lda #0
-        sta NUMH
-        sta NUM2
-        sta NUM3
-        jsr pldec
+        ldx #0
+        jsr stnum
         jsr plend
 ; --- transmit power ---
-        jsr plnew
         lda #<srpwr
-        sta SPL
-        lda #>srpwr
-        sta SPH
-        jsr plstr
+        ldx #>srpwr
+        jsr stl
         lda RPWR
-        sta NUML
-        lda #0
-        sta NUMH
-        sta NUM2
-        sta NUM3
-        jsr pldec
+        ldx #0
+        jsr stnum
         lda #<sdbm
-        sta SPL
-        lda #>sdbm
-        sta SPH
-        jsr plstr
-        jsr plend
+        ldx #>sdbm
+        jsr stend
 ; --- node name ---
-        jsr plnew
         lda #<srname
-        sta SPL
-        lda #>srname
-        sta SPH
-        jsr plstr
+        ldx #>srname
+        jsr stl
         jsr plend
 ; --- actions ---
-        jsr plnew
         lda #<srapply
-        sta SPL
-        lda #>srapply
-        sta SPH
-        jsr plstr
+        ldx #>srapply
+        jsr stl
         jsr plend
-        jsr plnew
         lda #<sradz
-        sta SPL
-        lda #>sradz
-        sta SPH
-        jsr plstr
+        ldx #>sradz
+        jsr stl
         jsr plend
-        jsr plnew
         lda #<sradf
-        sta SPL
-        lda #>sradf
-        sta SPH
-        jsr plstr
+        ldx #>sradf
+        jsr stl
         jsr plend
-        jsr plnew
         lda #<srpurge
-        sta SPL
-        lda #>srpurge
-        sta SPH
-        jsr plstr
+        ldx #>srpurge
+        jsr stl
         jsr plend
+        lda #<srph              ; path hash size, from DEVICE_INFO (v2.1.1)
+        ldx #>srph
+        jsr stl
+        lda PHM
+        clc
+        adc #49
+        jsr plchr
+        lda #<sbyt1
+        ldx #>sbyt1
+        ldy PHM
+        beq rph1
+        lda #<sbyts
+        ldx #>sbyts
+rph1:   jsr stend
 
         lda #147
         jsr CHROUT
@@ -8949,10 +8983,58 @@ rvdraw: jsr plinit
         beq rvadz
         cmp #8
         beq rvadf
-        jmp purge4              ; 9: purge old nodes (255, F1, lands below)
+        cmp #9
+        bne rvph
+        jmp purge4              ; 9: purge old nodes
 rvdone: lda #0
         sta UIMODE
         jmp mmshut
+
+; ----- path hash size (v2.1.1): 1 -> 2 -> 3 bytes -> 1 -----
+; CMD_SET_PATH_HASH_MODE (61, 0, mode 0-2); the radio saves it. Then
+; DEVICE_QUERY again: dinfo -> phsave reads back what the radio now uses.
+rvph:   lda #1                  ; menu() cleared it; nothing prints over us
+        sta UIMODE
+        ldx PHM
+        inx
+        cpx #3
+        bcc rvph2
+        ldx #0
+rvph2:  stx TXBUF+2
+        lda #61
+        sta TXBUF
+        lda #0
+        sta TXBUF+1
+        sta STGBIT
+        lda #3
+        sta TXLEN
+        jsr sendfr
+        lda #0                  ; RESP_CODE_OK
+        jsr waitop
+        lda #<pyquery
+        sta PTR
+        lda #>pyquery
+        sta PTRH
+        lda #2
+        jsr setpay
+        jsr sendfr
+        lda #13                 ; RESP_CODE_DEVICE_INFO
+        jsr waitop
+        jmp rvdraw
+; dinfo ends here: the path hash mode, byte 81 of DEVICE_INFO (0 if absent)
+phsave: lda BUF+81              ; the raw frame: CBUF is character-converted
+        cmp #3
+        bcc phs2
+        lda #0
+phs2:   sta PHM
+        rts
+PHM:    .byte 0
+srph:   .text "Path hash: "
+        .byte 0
+sbyt1:  .text " byte"
+        .byte 0
+sbyts:  .text " bytes"
+        .byte 0
 
 ; step frequency through the common band presets
 rvfreq: inc RIDX
@@ -9143,13 +9225,9 @@ rva2:   lda RFREQ,x
         sta TXLEN
         jsr sendfr
         jsr plinit
-        jsr plnew
         lda #<srsent
-        sta SPL
-        lda #>srsent
-        sta SPH
-        jsr plstr
-        jsr plend
+        ldx #>srsent
+        jsr stend
         lda #<tradio
         sta MNTIT
         lda #>tradio
@@ -9933,7 +10011,851 @@ lrw9:   rts
 
 
 LRCH:   .byte 0
+
+; ===== call segment 8 (v2.2) ===========================================
+; X = the routine's number in k8tab. The KERNAL is banked out ($35: RAM at
+; $e000, I/O stays) with IRQs held off; the serial NMI still runs, through
+; segment 8's own vector. A comes back from the routine; Y goes in.
+kcall:  php
+        sei
+        lda #$35
+        sta 1
+        jsr k8disp
+        pha
+        lda #$36
+        sta 1
+        pla
+        plp
+        rts
 """
+
+# Segment 8 (v2.2): RAM under the KERNAL, assembled so that it ends at $ffff
+# (its last six bytes are the NMI/RESET/IRQ vectors used while the KERNAL is
+# banked out). Carried in the image after segment 7, copied by main first.
+S8ORG = 0xFF00            # settles in assemble4: $10000 - 256 * pages
+S8PG = 1
+SEG8 = b''
+SRC8 = r"""
+; ===== segment 8 (v2.2): under the KERNAL, called through kcall ==========
+; Runs with $01 = $35 and IRQs off: no KERNAL calls (CHROUT, GETIN ...) and
+; nothing long. Everything in RAM -- segments 1-7, the buffers -- is fine.
+k8disp: lda k8hi,x              ; the table holds address - 1: RTS jumps
+        pha
+        lda k8lo,x
+        pha
+        rts
+k8lo:   .byte <stver-1,<hashch-1,<ldini-1,<ldpkt-1,<ldkey-1
+k8hi:   .byte >stver-1,>hashch-1,>ldini-1,>ldpkt-1,>ldkey-1
+; The NMI with the KERNAL out: the same SEI + JMP ($0318) as its $fe43, so
+; the serial driver's timing does not change.
+k8nmi:  sei
+        jmp (NMIVEC)
+k8rti:  rti
+
+; ===== Stats: the program's and the radio's versions (v2.1.1) ============
+; Starts the Stats panel (in place of plinit) with two lines (k8 routine 0).
+stver:  jsr plinit
+        lda #<PLSTAT            ; 14 lines, two more than PLBUF holds
+        sta PLBASE
+        lda #>PLSTAT
+        sta PLBASE+1
+        lda #<sver4             ; this program's version, from the banner
+        ldx #>sver4
+        jsr stl
+        ldx #0
+stvr1:  lda banner+13,x
+        cmp #13
+        beq stvr2
+        jsr plchr
+        inx
+        bne stvr1
+stvr2:  jsr plend
+        lda #<sfw4              ; the radio's firmware, from DEVICE_INFO
+        ldx #>sfw4
+        jsr stl
+        lda #<FWVER
+        ldx #>FWVER
+        jmp stend
+sver4:  .text "Version   "
+        .byte 0
+sfw4:   .text "Firmware  "
+        .byte 0
+
+
+; ===== Live dump (v2.2): the decoding, in segment 8 =====================
+; One packet -> LDBUF (normal RAM; segment 2's loop prints it). LDCOL is
+; the column on the current screen line: a field that would not fit before
+; the last column starts a new line, indented two. That one rule lays the
+; same fields out for 40 and for 80 columns.
+ldini:  lda #0
+        sta LDPAU
+        sta LDFLT               ; every visit starts showing all types
+        sta LDSKP
+        sta LDEXIT
+        jsr ldbeg
+        lda #147
+        jsr ldraw
+        lda #<ldhdr
+        ldx #>ldhdr
+        jsr ldstr
+        lda #36                 ; the keys: beside the title in 80 columns,
+        jsr ldfit               ; under it in 40
+        lda #<ldhlp
+        ldx #>ldhlp
+        jsr ldstr
+        jsr ldnl
+        jmp ldend
+
+; keys: Y = the key. F1 / RUN/STOP leave; SPACE pause; P payload bytes; T type
+ldkey:  jsr ldbeg
+        tya
+        cmp #133
+        beq ldkx
+        cmp #3
+        beq ldkx
+        cmp #32
+        beq ldkp
+        and #$7F
+        cmp #80                 ; p / P
+        beq ldkh
+        cmp #84                 ; t / T
+        beq ldkt
+        jmp ldend
+ldkx:   inc LDEXIT
+        jmp ldend
+ldkp:   lda LDPAU
+        eor #1
+        sta LDPAU
+        bne ldkp1
+        lda #<lmres             ; "-- running, n skipped --"
+        ldx #>lmres
+        jsr ldmsg
+        lda LDSKP
+        jsr lddec
+        lda #<lmskp
+        ldx #>lmskp
+        jsr ldstr
+        lda #0
+        sta LDSKP
+        jmp ldend
+ldkp1:  lda #<lmpau
+        ldx #>lmpau
+        jsr ldmsg
+        jmp ldend
+ldkh:   lda LDHEX
+        eor #1
+        sta LDHEX
+        lda #<lmhex
+        ldx #>lmhex
+        jsr ldmsg
+        lda #<lmoff
+        ldx #>lmoff
+        ldy LDHEX
+        beq ldkh1
+        lda #<lmon
+        ldx #>lmon
+ldkh1:  jsr ldstr
+        jmp ldend
+ldkt:   ldx LDFLT
+        inx
+        cpx #6
+        bcc ldkt1
+        ldx #0
+ldkt1:  stx LDFLT
+        lda #<lmshow
+        ldx #>lmshow
+        jsr ldmsg
+        lda LDFLT
+        asl
+        asl
+        asl
+        clc
+        adc #<lfnam
+        ldx #>lfnam
+        bcc ldkt2
+        inx
+ldkt2:  jsr ldstr
+        jmp ldend
+; a status line: grey, "-- " and the text at A/X
+ldmsg:  pha
+        txa
+        pha
+        lda #152
+        jsr ldraw
+        pla
+        tax
+        pla
+        jmp ldstr
+
+; ---- one packet ----
+ldpkt:  jsr ldbeg
+        lda BUF
+        cmp #$88
+        bne ldpx
+        lda FLEN
+        cmp #5                  ; code, snr, rssi, header, path length
+        bcc ldpx
+        lda LDPAU
+        beq ldp1
+        inc LDSKP
+        bne ldpx
+        dec LDSKP
+ldpx:   jmp ldend
+ldp1:   lda BUF+3               ; payload type, bits 2-5
+        lsr
+        lsr
+        and #15
+        sta LDTY
+        lda LDFLT
+        beq ldp2
+        ldx LDTY
+        cmp ldcat,x
+        bne ldpx
+ldp2:   lda BUF+3
+        and #3
+        sta LDRT
+        ldx #4                  ; the path length byte...
+        cmp #0
+        beq ldp3
+        cmp #3
+        bne ldp4
+ldp3:   ldx #8                  ; ...after 4 transport code bytes
+ldp4:   stx LDPL
+        lda BUF,x
+        and #63
+        sta LDPC
+        lda BUF,x
+        rol
+        rol
+        rol
+        and #3
+        clc
+        adc #1
+        sta LDPS
+        lda LDPL                ; payload index = pl + 1 + hops * size
+        sec                     ; (+1)
+        adc #0
+        ldy LDPC
+        beq ldp6
+ldp5:   clc
+        adc LDPS
+        bcs ldpx                ; nonsense: past 255
+        dey
+        bne ldp5
+ldp6:   sta LDPI
+; --- the time ---
+        lda #155
+        jsr ldraw
+        ldx #0
+ldtm:   lda TSOK
+        bne ldtm1
+        lda ldnot,x
+        jmp ldtm2
+ldtm1:  lda TSTR+11,x
+ldtm2:  jsr ldch
+        inx
+        cpx #8
+        bcc ldtm
+; --- type, in its colour ---
+        lda #4
+        jsr ldfit
+        ldx LDTY
+        lda ldtcol,x
+        jsr ldraw
+        lda LDTY
+        asl
+        asl
+        tax
+        ldy #4
+ldty:   lda ldtnm,x
+        jsr ldch
+        inx
+        dey
+        bne ldty
+; --- route ---
+        lda #2
+        jsr ldfit
+        lda #5
+        jsr ldraw
+        lda LDRT
+        asl
+        tax
+        lda ldrnm,x
+        jsr ldch
+        lda ldrnm+1,x
+        jsr ldch
+; --- hops ---
+        lda #3
+        jsr ldfit
+        lda #104                ; h
+        jsr ldch
+        lda LDPC
+        jsr lddec
+; --- signal: RSSI dBm, SNR dB ---
+        lda #6
+        jsr ldfit
+        lda #155
+        jsr ldraw
+        lda BUF+2
+        jsr ldsdec
+        lda #<ldbm
+        ldx #>ldbm
+        jsr ldstr
+        lda #5
+        jsr ldfit
+        lda BUF+1               ; snr * 4
+        bpl ldsn1
+        eor #$FF
+        clc
+        adc #1
+        pha
+        lda #45                 ; -
+        jsr ldch
+        pla
+ldsn1:  pha
+        lsr
+        lsr
+        jsr lddec
+        lda #46                 ; .
+        jsr ldch
+        pla
+        and #3
+        tax
+        lda ldq,x
+        jsr ldch
+        lda #<lddb
+        ldx #>lddb
+        jsr ldstr
+; --- size of the raw packet ---
+        lda #4
+        jsr ldfit
+        lda FLEN
+        sec
+        sbc #3
+        jsr lddec
+        lda #98                 ; b
+        jsr ldch
+; --- what the type carries in the clear ---
+        lda #5
+        jsr ldraw
+        ldx LDTY
+        lda ldtcat,x
+        asl
+        tax
+        lda lddtab+1,x
+        pha
+        lda lddtab,x
+        pha
+        rts
+; each returns to ldpath
+ldd0:   jmp ldpath              ; nothing readable
+ldd1:   lda #5                  ; dest / source hashes
+        jsr ldfit
+        lda #<ldto
+        ldx #>ldto
+        jsr ldstr
+        ldx LDPI
+        lda BUF,x
+        jsr ldhx
+        lda LDTY
+        cmp #7                  ; anon: an ephemeral key, not a source hash
+        beq ldd1a
+        lda #5
+        jsr ldfit
+        lda #<ldfr
+        ldx #>ldfr
+        jsr ldstr
+        ldx LDPI
+        lda BUF+1,x
+        jsr ldhx
+        jmp ldpath
+ldd1a:  ldx LDPI
+        inx
+        jsr ldkey4
+        jmp ldpath
+ldd2:   lda #5                  ; group: the channel hash
+        jsr ldfit
+        lda #<ldchs
+        ldx #>ldchs
+        jsr ldstr
+        ldx LDPI
+        lda BUF,x
+        jsr ldhx
+        jmp ldpath
+ldd3:   lda #12                 ; ack: the checksum
+        jsr ldfit
+        lda #<ldcrc
+        ldx #>ldcrc
+        jsr ldstr
+        ldx LDPI
+        jsr ldhx4
+        jmp ldpath
+ldd4:   ldx LDPI                ; advert: key, kind, name
+        jsr ldkey4
+        lda LDPI
+        clc
+        adc #100                ; key 32 + time 4 + signature 64
+        bcs ldd4x
+        tax
+        cpx FLEN
+        bcs ldd4x
+        lda BUF,x
+        sta LDAF
+        and #15
+        cmp #5
+        bcc ldd4a
+        lda #0
+ldd4a:  asl
+        asl
+        tay
+        lda #4
+        jsr ldfit
+        ldx #4
+ldd4b:  lda ldknd,y
+        jsr ldch
+        iny
+        dex
+        bne ldd4b
+        lda LDAF
+        bpl ldd4x               ; no name
+        ldx LDPI
+        inx                     ; past the flags
+        txa
+        clc
+        adc #100
+        tax
+        lda LDAF
+        and #$40
+        beq ldd4c
+        inx                     ; feature 2
+        inx
+ldd4c:  nop
+        lda LDAF
+        and #$10
+        beq ldd4d
+        txa
+        clc
+        adc #8                  ; latitude, longitude
+        tax
+ldd4d:  lda LDAF
+        and #$20
+        beq ldd4e
+        inx                     ; feature 1
+        inx
+ldd4e:  stx LDNI
+        lda FLEN                ; the name runs to the end
+        sec
+        sbc LDNI
+        bcc ldd4x
+        beq ldd4x
+        cmp #24
+        bcc ldd4f
+        lda #24
+ldd4f:  sta LDNL
+        clc
+        adc #2
+        jsr ldfit
+        lda #159
+        jsr ldraw
+        jsr ldqt                ; the name in quotes: a balanced pair
+        ldx LDNI
+ldd4g:  lda BUF,x
+        beq ldd4h
+        jsr ldch
+        inx
+        dec LDNL
+        bne ldd4g
+ldd4h:  jsr ldqt
+        lda #5
+        jsr ldraw
+ldd4x:  jmp ldpath
+ldd5:   lda #12                 ; trace: its tag
+        jsr ldfit
+        lda #<ldtag
+        ldx #>ldtag
+        jsr ldstr
+        ldx LDPI
+        jsr ldhx4
+; --- transport code, path, then the bytes ---
+ldpath: lda LDRT
+        beq ldpt0
+        cmp #3
+        bne ldpt1
+ldpt0:  lda #7
+        jsr ldfit
+        lda #<ldtc
+        ldx #>ldtc
+        jsr ldstr
+        lda BUF+5
+        jsr ldhx
+        lda BUF+4
+        jsr ldhx
+ldpt1:  lda LDPC
+        beq ldhxd
+        lda #154
+        jsr ldraw
+        lda #3
+        jsr ldfit
+        lda #<ldvia
+        ldx #>ldvia
+        jsr ldstr
+        ldx LDPL
+        inx
+        lda LDPC
+        sta LDN
+ldpt2:  lda LDPS
+        asl
+        jsr ldfit
+        ldy LDPS
+ldpt3:  lda BUF,x
+        jsr ldhx
+        inx
+        dey
+        bne ldpt3
+        dec LDN
+        bne ldpt2
+; --- P: the payload as rows of hex, then the same bytes as text, so any
+; plain text in a packet reads straight off (8 a row in 40 columns, 16 in 80)
+ldhxd:  lda LDHEX
+        beq ldpe
+        lda #8
+        ldy KWID
+        cpy #80
+        bcc ldhw
+        lda #16
+ldhw:   sta LDW2
+        ldx LDPI
+ldhr:   cpx FLEN
+        bcs ldpe
+        jsr ldroom
+        bcs ldpe                ; the buffer is full: the rest is left off
+        jsr ldnl
+        lda #152
+        jsr ldraw
+        lda #32
+        jsr ldch
+        jsr ldch
+        stx LDN                 ; the row's first byte
+        ldy LDW2
+ldhb:   cpx FLEN
+        bcs ldhp
+        lda BUF,x
+        jsr ldhx
+        lda #32
+        jsr ldch
+        inx
+        dey
+        bne ldhb
+ldhp:   cpy #0                  ; a short last row: line the text up
+        beq ldht
+        lda #32
+        jsr ldch
+        jsr ldch
+        jsr ldch
+        dey
+        jmp ldhp
+ldht:   lda #155
+        jsr ldraw
+        ldx LDN
+        ldy LDW2
+ldhc:   cpx FLEN
+        bcs ldhr
+        lda BUF,x
+        jsr ldch                ; unprintable bytes show as .
+        inx
+        dey
+        bne ldhc
+        lda #152
+        jsr ldraw
+        jmp ldhr
+ldpe:   jsr ldnl
+        jmp ldend
+; carry set when there is no room for another 80 column payload row
+ldroom: lda LDPOSH
+        beq ldrm0
+        lda LDPOS
+        cmp #$B0
+        rts
+ldrm0:  clc
+        rts
+
+; X -> "k:" + 4 bytes at BUF+X
+ldkey4: lda #10
+        jsr ldfit
+        lda #<ldks
+        stx LDN
+        ldx #>ldks
+        jsr ldstr
+        ldx LDN
+; 4 bytes at BUF+X as hex
+ldhx4:  ldy #4
+ldh41:  lda BUF,x
+        jsr ldhx
+        inx
+        dey
+        bne ldh41
+        rts
+
+; ---- the buffer ----
+; LDBUF holds up to 496 bytes: LDPOSH:LDPOS, and the store's own high
+; byte steps with LDPOSH
+ldbeg:  lda #0
+        sta LDPOS
+        sta LDPOSH
+        sta LDCOL
+        lda #>LDBUF
+        sta ldrwa+2
+        rts
+ldend:  lda ldrwa+2
+        sta ldena+2
+        ldx LDPOS
+        lda #0
+ldena:  sta LDBUF,x
+        rts
+; a control code (colour, clear, CR): no column
+ldraw:  stx LDSX
+        ldx LDPOSH
+        beq ldrw0
+        ldx LDPOS
+        cpx #$F0
+        bcs ldrw1               ; full: keep the last bytes for the end
+ldrw0:  ldx LDPOS
+ldrwa:  sta LDBUF,x
+        inx
+        stx LDPOS
+        bne ldrw1
+        inc LDPOSH
+        inc ldrwa+2
+ldrw1:  ldx LDSX
+        rts
+ldnl:   lda #13
+        jsr ldraw
+        lda #0
+        sta LDCOL
+        rts
+; a visible character (ascii in, PETSCII out); wraps before the last column
+ldch:   pha
+        lda LDCOL
+        clc
+        adc #1
+        cmp KWID
+        bcc ldc1
+        jsr ldwrap
+ldc1:   pla
+        cmp #34                 ; a quote would put the screen editor in
+        bne ldc0                ; quote mode: colours then print as symbols
+        lda #39
+ldc0:   cmp #32
+        bcc ldc3
+        cmp #127
+        bcs ldc3
+        cmp #65
+        bcc ldc4
+        cmp #91
+        bcs ldc2
+        ora #$80                ; A-Z
+        bne ldc4
+ldc2:   cmp #97
+        bcc ldc4
+        cmp #123
+        bcs ldc4
+        and #$DF                ; a-z
+        bne ldc4
+ldc3:   lda #46                 ; unprintable: .
+ldc4:   inc LDCOL
+        jmp ldraw
+ldwrap: jsr ldnl
+        lda #32
+        jsr ldraw
+        jsr ldraw
+        lda #2
+        sta LDCOL
+        rts
+; a real quote character (ldch shows " as '): one column
+ldqt:   inc LDCOL
+        lda #34
+        jmp ldraw
+; room for a field of A columns (plus its space) on this line, else wrap
+ldfit:  sta LDW
+        lda LDCOL
+        beq ldf2
+        sec                     ; + 1 for the space
+        adc LDW
+        cmp KWID
+        bcc ldf1
+        jmp ldwrap
+ldf1:   lda #32
+        jmp ldch
+ldf2:   rts
+; the string at A/X: control codes as they are, the rest through ldch
+ldstr:  sta SPL
+        stx SPH
+        sty LDSY
+        ldy #0
+lds1:   lda (SPL),y
+        beq lds3
+        cmp #32
+        bcc lds2
+        cmp #128
+        bcc lds4
+        cmp #160
+        bcs lds4
+lds2:   jsr ldraw
+        jmp lds5
+lds4:   jsr ldch
+lds5:   iny
+        bne lds1
+lds3:   ldy LDSY
+        rts
+; A as two hex digits
+ldhx:   pha
+        lsr
+        lsr
+        lsr
+        lsr
+        jsr hexdig
+        jsr ldch
+        pla
+        and #15
+        jsr hexdig
+        jmp ldch
+; A as a signed decimal
+ldsdec: cmp #128
+        bcc lddec
+        eor #$FF
+        clc
+        adc #1
+        pha
+        lda #45
+        jsr ldch
+        pla
+; A as decimal, no leading zeros
+lddec:  stx LDSX2
+        sty LDSY2
+        ldx #0
+        stx LDN
+ldd100: cmp #100
+        bcc ldd10
+        sbc #100
+        inx
+        bne ldd100
+ldd10:  pha
+        txa
+        beq ldd11
+        ora #48
+        jsr ldch
+        inc LDN
+ldd11:  pla
+        ldx #0
+ldd12:  cmp #10
+        bcc ldd13
+        sbc #10
+        inx
+        bne ldd12
+ldd13:  pha
+        txa
+        ldy LDN
+        bne ldd14
+        cmp #0
+        beq ldd15
+ldd14:  ora #48
+        jsr ldch
+ldd15:  pla
+        ora #48
+        jsr ldch
+        ldx LDSX2
+        ldy LDSY2
+        rts
+
+; ---- tables and text ----
+ldhdr:  .byte 18
+        .text " Live dump "
+        .byte 146,152,0
+ldhlp:  .text "SPACE pause P payload T type F1 back"
+        .byte 0
+ldnot:  .text "--:--:--"
+ldtnm:  .text "REQ RESPTEXTACK ADV GRP DATAANONPATHTRCEPARTCTRL?12 ?13 ?14 RAW "
+ldtcol: .byte 158,158,158,152,159,153,30,129,154,156,152,152,150,150,150,150
+; what each type shows: 0 nothing, 1 to/from, 2 channel, 3 crc, 4 advert, 5 tag
+ldtcat: .byte 1,1,1,3,4,2,2,1,1,5,0,0,0,0,0,0
+lddtab: .word ldd0-1,ldd1-1,ldd2-1,ldd3-1,ldd4-1,ldd5-1
+; T: 0 all, 1 adverts, 2 group, 3 direct, 4 acks, 5 the rest
+ldcat:  .byte 3,3,3,4,1,2,2,3,3,5,5,5,5,5,5,5
+lfnam:  .text "all    "
+        .byte 0
+        .text "adverts"
+        .byte 0
+        .text "group  "
+        .byte 0
+        .text "direct "
+        .byte 0
+        .text "acks   "
+        .byte 0
+        .text "other  "
+        .byte 0
+ldrnm:  .text "TFFLDRTD"
+ldknd:  .text "?   chatrptrroomsens"
+ldq:    .text "3580"
+ldbm:   .text "dBm"
+        .byte 0
+lddb:   .text "dB"
+        .byte 0
+ldto:   .text "to:"
+        .byte 0
+ldfr:   .text "fr:"
+        .byte 0
+ldchs:  .text "ch:"
+        .byte 0
+ldcrc:  .text "crc:"
+        .byte 0
+ldtag:  .text "tag:"
+        .byte 0
+ldks:   .text "k:"
+        .byte 0
+ldtc:   .text "tc:"
+        .byte 0
+ldvia:  .text "via"
+        .byte 0
+lmpau:  .text "-- paused: SPACE runs again --"
+        .byte 13,0
+lmres:  .text "-- running, skipped "
+        .byte 0
+lmskp:  .text " --"
+        .byte 13,0
+lmhex:  .text "-- payload "
+        .byte 0
+lmon:   .text "on --"
+        .byte 13,0
+lmoff:  .text "off --"
+        .byte 13,0
+lmshow: .text "-- showing: "
+        .byte 0
+LDPAU:  .byte 0
+LDSKP:  .byte 0
+LDHEX:  .byte 0
+LDFLT:  .byte 0
+LDPOS:  .byte 0
+LDCOL:  .byte 0
+LDTY:   .byte 0
+LDRT:   .byte 0
+LDPL:   .byte 0
+LDPC:   .byte 0
+LDPS:   .byte 0
+LDPI:   .byte 0
+LDAF:   .byte 0
+LDNI:   .byte 0
+LDNL:   .byte 0
+LDN:    .byte 0
+LDSX:   .byte 0
+LDSX2:  .byte 0
+LDSY:   .byte 0
+LDSY2:  .byte 0
+LDW:    .byte 0
+LDW2:   .byte 0
+LDPOSH: .byte 0
+"""
+K8 = {"K8STVER": 0, "K8HASH": 1, "K8LDINI": 2, "K8LDPKT": 3, "K8LDKEY": 4}
+SRC8 += "\n; ===== sha256 (#hashtag channel keys), segment 8 since v2.2 =====\n" + sha256_6502.source()
 SRC6 = r"""
 ; ===== segment 6 (v2.1): timestamps, the alert sound, Settings ==========
 ; Lives at $6280-$67FF: the top 1408 bytes of the node table's first block
@@ -11288,7 +12210,8 @@ stat4:  lda #20                 ; CMD_GET_BATT_AND_STORAGE
         sta STGBIT
         lda #12                 ; RESP_CODE_BATT_AND_STORAGE
         jsr waitop
-        jsr plinit
+        ldx #K8STVER            ; a fresh panel, with the two version lines
+        jsr kcall
         lda #<sbat4             ; battery mV
         ldx #>sbat4
         jsr stl
@@ -11782,8 +12705,8 @@ skeys2: .byte 5
 mmsel2: lda K80
         bne mmsel               ; 80 on: "40 column mode"
         lda KWOK
-        beq mmsel               ; no Kawari: the usual seven
-        lda #8
+        beq mmsel               ; no Kawari: the usual eight
+        lda #9
         sta MNN
         lda #<mtab40
         sta MNPTR
@@ -11798,7 +12721,7 @@ mmc1:   lda KWOK
         beq mmc2
         jsr k80on
 mmc2:   jmp mmshut              ; clear and repaint the chat
-mtab40: .word mi0,mi1,mi2,mi3,mi4,miset,mi80,mi5
+mtab40: .word mi0,mi1,mi2,mi3,mi4,miset,milive,mi80,mi5
 mi80:   .text "80 column mode"
         .byte 0
 KWOK:   .byte 0
@@ -11809,14 +12732,14 @@ KWOK:   .byte 0
 ; column chat is on.
 mmsel:  lda K80
         bne mms80
-        lda #7
+        lda #8
         sta MNN
         lda #<mtab
         sta MNPTR
         lda #>mtab
         sta MNPTRH
         rts
-mms80:  lda #8
+mms80:  lda #9
         sta MNN
         lda #<mtab80
         sta MNPTR
@@ -11839,7 +12762,7 @@ k40off: lda KOLDV               ; CHROUT back to the KERNAL
         and #239
         sta $D037
         jmp mmshut              ; clear and repaint the chat (40 columns)
-mtab80: .word mi0,mi1,mi2,mi3,mi4,miset,mi40,mi5
+mtab80: .word mi0,mi1,mi2,mi3,mi4,miset,milive,mi40,mi5
 mi40:   .text "40 column mode"
         .byte 0
 
@@ -13286,7 +14209,8 @@ pnl5:   lda (PTR),y
         lda PN_FS
         bmi pnl6
         jsr pnrest              ; one flash at a time
-pnl6:   lda #1                  ; white
+pnl6:   jsr ledrep              ; the lamps too (v2.2)
+        lda #1                  ; white
         ldx #0
         jsr pnpaint
         lda #0
@@ -13301,16 +14225,6 @@ pnrest: ldx PN_FS
         lda #255
         sta PN_FS
         rts
-; main loop: end a flash after ~0.25 s
-flrest: lda PN_FS
-        bmi flrt
-        lda $A2
-        sec
-        sbc PN_FT
-        cmp #15
-        bcc flrt
-        jmp pnrest
-flrt:   rts
 
 PN_ST:  .byte 0,0
 PN_SN:  .byte 0,0
@@ -13352,13 +14266,15 @@ def assemble4(src1, src2, src3, src4):
     """Five segments that call each other; placeholders settle in a few passes.
     Segment 5's bytes are left in SEG5 (the return value stays four code
     blocks, as every test harness expects)."""
-    global SEG5, SEG6, SEG7
+    global SEG5, SEG6, SEG7, SEG8, S8ORG, S8PG
     def labels(src):
         return [p[0] for p in (parse(l) for l in src.splitlines()) if p and p[0]]
     labels2, labels3, labels4, labels5 = labels(src2), labels(src3), labels(src4), labels(SRC5)
     labels6 = labels(SRC6)
     labels7 = labels(SRC7)
-    others = set(labels2) | set(labels3) | set(labels4) | set(labels5) | set(labels6) | set(labels7)
+    labels8 = labels(SRC8)
+    others = (set(labels2) | set(labels3) | set(labels4) | set(labels5) | set(labels6) | set(labels7)
+              | set(labels8))
     src1 = src1 + "\ns2img:\n"
     s2 = {n: S2ORG for n in labels2}
     s3 = {n: S3ORG for n in labels3}
@@ -13366,47 +14282,78 @@ def assemble4(src1, src2, src3, src4):
     s5 = {n: S5ORG for n in labels5}
     s6 = {n: S6ORG for n in labels6}
     s7 = {n: S7ORG for n in labels7}
+    s8 = {n: S8ORG for n in labels8}
+    def s8eq(eq):
+        eq.update(K8)
+        eq["S8PG"] = S8PG
+        eq["S8DSTH"] = S8ORG >> 8
+        eq["S8IMGH"] = (S4IMG >> 8) + eq.get("S4PG", 1) + 4 + 6 + 1   # after the seg 4/5/6/7 images
+        return eq
     eq1 = dict(EQU)
-    for d in (s2, s3, s4, s5, s6, s7):
+    for d in (s2, s3, s4, s5, s6, s7, s8):
         eq1.update(d)
     eq1["S2PG"] = 1
     eq1["S4PG"] = 1
+    s8eq(eq1)
     prev = None
     for _ in range(8):
         code1, syms1 = assemble(src1, ORG, eq1)
         base = {k: v for k, v in syms1.items() if k not in others}
         eq2 = dict(base); eq2.update(s3); eq2.update(s4); eq2.update(s5); eq2.update(s6); eq2.update(s7)
+        eq2.update(s8); s8eq(eq2)
         code2, syms2 = assemble(src2, S2ORG, eq2)
         s2 = {n: syms2[n] for n in labels2}
         eq3 = dict(base); eq3.update(s2); eq3.update(s4); eq3.update(s5); eq3.update(s6); eq3.update(s7)
+        eq3.update(s8); s8eq(eq3)
         code3, syms3 = assemble(src3, S3ORG, eq3)
         s3 = {n: syms3[n] for n in labels3}
         eq4 = dict(base); eq4.update(s2); eq4.update(s3); eq4.update(s5); eq4.update(s6); eq4.update(s7)
+        eq4.update(s8); s8eq(eq4)
         code4, syms4 = assemble(src4, S4ORG, eq4)
         s4 = {n: syms4[n] for n in labels4}
         eq5 = dict(base); eq5.update(s2); eq5.update(s3); eq5.update(s4); eq5.update(s6); eq5.update(s7)
+        eq5.update(s8); s8eq(eq5)
         code5, syms5 = assemble(SRC5, S5ORG, eq5)
         s5 = {n: syms5[n] for n in labels5}
         eq6 = dict(base); eq6.update(s2); eq6.update(s3); eq6.update(s4); eq6.update(s5); eq6.update(s7)
+        eq6.update(s8); s8eq(eq6)
         code6, syms6 = assemble(SRC6, S6ORG, eq6)
         s6 = {n: syms6[n] for n in labels6}
         eq7 = dict(base); eq7.update(s2); eq7.update(s3); eq7.update(s4); eq7.update(s5); eq7.update(s6)
+        eq7.update(s8); s8eq(eq7)
         code7, syms7 = assemble(SRC7, S7ORG, eq7)
         s7 = {n: syms7[n] for n in labels7}
+        eq8 = dict(base); eq8.update(s2); eq8.update(s3); eq8.update(s4); eq8.update(s5); eq8.update(s6)
+        eq8.update(s7); s8eq(eq8)
+        code8, syms8 = assemble(SRC8, S8ORG, eq8)
+        s8 = {n: syms8[n] for n in labels8}
+        # top-aligned: code, padding, then the NMI / RESET / IRQ vectors at $fffa
+        pg8 = (len(code8) + 6 + 255) // 256
+        if pg8 != S8PG or S8ORG != 0x10000 - 256 * pg8:
+            S8PG = pg8
+            S8ORG = 0x10000 - 256 * pg8
+            s8 = {n: S8ORG for n in labels8}
+            prev = None
+            continue
+        img8 = bytes(code8) + bytes(256 * S8PG - 6 - len(code8))
+        for v in (syms8["k8nmi"], syms8["k8rti"], syms8["k8rti"]):
+            img8 += bytes([v & 0xFF, v >> 8])
         eq1 = dict(EQU)
-        for d in (s2, s3, s4, s5, s6, s7):
+        for d in (s2, s3, s4, s5, s6, s7, s8):
             eq1.update(d)
         eq1["S2PG"] = (len(code2) + 255) // 256
         eq1["S4PG"] = (len(code4) + 255) // 256
-        if (code1, code2, code3, code4, code5, code6, code7) == prev:
+        s8eq(eq1)
+        if (code1, code2, code3, code4, code5, code6, code7, code8) == prev:
             allsyms = dict(syms1)
-            for d in (syms2, syms3, syms4, syms5, syms6, syms7):
+            for d in (syms2, syms3, syms4, syms5, syms6, syms7, syms8):
                 allsyms.update(d)
             SEG5 = bytes(code5)
             SEG6 = bytes(code6)
             SEG7 = bytes(code7)
+            SEG8 = img8
             return code1, allsyms, code2, code3, code4
-        prev = (code1, code2, code3, code4, code5, code6, code7)
+        prev = (code1, code2, code3, code4, code5, code6, code7, code8)
     raise ValueError("segments did not settle")
 
 
@@ -13434,7 +14381,7 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
     src1 = SRC.replace(msg, 'msgcon: .text "connecting at %d baud..."' % baud)
     src1 = strip_debug(src1, testk)
     code, syms, code2, code3, code4 = assemble4(src1 + keytable(testk) + artwork(),
-                                                SRC2 + sha256_6502.source(), SRC3, SRC4)
+                                                SRC2, SRC3, SRC4)
     if syms["KOLDV"] & 0xFF == 0xFF:
         raise ValueError("KOLDV at $%04X: JMP () would wrap the page" % syms["KOLDV"])
     code = bytearray(code)
@@ -13469,7 +14416,8 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
     vals = [("btlo", (bit - 1) & 0xFF), ("bthi", (bit - 1) >> 8),
             ("hblo", half & 0xFF), ("hbhi", half >> 8),
             ("blankb", blank), ("testk", testk),
-            ("geook", 0 if nogeo else 1)]
+            ("geook", 0 if nogeo else 1),
+            ("leddd", 120 if (testk or os.environ.get("MC64_LED4")) else 126)]
     # the runtime table: PAL quad then NTSC quad, contiguous
     for i, v in enumerate([(bit - 1) & 0xFF, (bit - 1) >> 8, half & 0xFF, half >> 8,
                            (nbit - 1) & 0xFF, (nbit - 1) >> 8, nhalf & 0xFF, nhalf >> 8]):
@@ -13516,6 +14464,13 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
     if S7ORG + len(SEG7) > S7MAX:
         raise ValueError("segment 7 is %d bytes: past $%04X" % (len(SEG7), S7MAX))
     prg += bytes(S7ORG - 0x0300) + SEG7 + bytes(S7MAX - S7ORG - len(SEG7))   # one page, from $40 on
+    # segment 8 (v2.2): whole pages, copied by main to $10000 - 256 * S8PG
+    s8img = ORG + len(prg) - 2
+    if s8img != syms["S8IMGH"] * 256 or s8img & 0xFF:
+        raise ValueError("segment 8 image at $%04X, main copies from $%02X00" % (s8img, syms["S8IMGH"]))
+    if s8img + len(SEG8) > 0xD000:
+        raise ValueError("segment 8 image runs to $%04X, into I/O" % (s8img + len(SEG8)))
+    prg += SEG8
     with open(out, "wb") as f:
         f.write(prg)
     return code, syms, prg, bit, half

@@ -1,13 +1,13 @@
-# MeshCore 64 EZ 2.1
+# MeshCore 64 EZ 2.2i
 
-MeshCore 64 2.1 for **EasyFlash** cartridges: `meshcore64-ez-v2.1.crt` (CRT type 32).
+MeshCore 64 2.2i for **EasyFlash** cartridges: `meshcore64-ez-v2.2i.crt` (CRT type 32).
 
-It is the same program, byte for byte, as the v2.1 PRG and cartridge images; only the cartridge wrapper differs.
+It is the same program, byte for byte, as the v2.2i PRG and cartridge images; only the cartridge wrapper differs.
 It does not write to the flash.
 
 - **Ultimate II+:** run the `.crt` from its menu.
 - **EasyFlash 3:** program it with EasyProg.
-- Needs the radio firmware from the [v2.1 release](https://github.com/pskerrett/meshcore64/releases/tag/v2.1)
+- Needs the radio firmware from the [v2.2i release](https://github.com/pskerrett/meshcore64/releases/tag/v2.2i)
   (`v1.17.1-c64-5760`): client and radio must both run at 5760 baud.
 
 **Status:** tested in VICE (NTSC and PAL, with and without an REU). Not yet tried on real EasyFlash

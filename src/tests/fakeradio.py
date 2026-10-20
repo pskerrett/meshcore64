@@ -44,6 +44,31 @@ def pad(s: bytes, n: int) -> bytes:
     """Fixed-width, NUL-padded - the source of all those null bytes."""
     return s[:n] + b"\x00" * max(0, n - len(s))
 
+PATH_HASH_MODE = int(_os.environ.get("MC64_PHMODE", "0"))   # 0-2 = 1-3 byte path hashes
+
+# MC64_LIVEMIX=1: the raw-packet log cycles through these (Live dump tests).
+# Frame: $88, snr*4 (signed), rssi (signed), then the raw packet.
+def _rx(snr4, rssi, raw):
+    return bytes([PUSH_LOG_RX_DATA, snr4 & 255, rssi & 255]) + raw
+_KEY = bytes([0x3A, 0x7F, 0x19, 0xC2]) + bytes(range(28))
+LIVEMIX = [
+    # advert, flood, 2 hops: repeater "W9PDS-rpt"
+    _rx(26, -97, bytes([0x11, 0x02, 0x4F, 0x21]) + _KEY + bytes(4) + bytes(64) + bytes([0x82]) + b"W9PDS-rpt"),
+    # group text, flood, 3 hops of 2-byte hashes, channel A3
+    _rx(-10, -112, bytes([0x15, 0x43, 0x4F, 0x21, 0x9C, 0x0E, 0x11, 0xD2, 0xA3, 0x12, 0x34]) + bytes(range(32))),
+    # ack, direct
+    _rx(44, -71, bytes([0x0E, 0x00, 0x9E, 0x41, 0xA0, 0xC2])),
+    # text message, direct, one hop: to 4F from 21
+    _rx(12, -88, bytes([0x0A, 0x01, 0x9C, 0x4F, 0x21, 0xBE, 0xEF]) + bytes(range(16))),
+    # trace, direct
+    _rx(8, -90, bytes([0x26, 0x00, 0xDE, 0xAD, 0xBE, 0xEF, 1, 2, 3, 4, 0])),
+    # group text, transport flood (code $1234), one hop, channel 7C
+    _rx(20, -101, bytes([0x14, 0x34, 0x12, 0x00, 0x00, 0x01, 0x11, 0x7C, 0x00, 0x00]) + bytes(range(16))),
+    # advert from a companion with location: "Pat's C64"
+    _rx(30, -80, bytes([0x11, 0x00]) + bytes([0xC6, 0x40, 0x01, 0x02]) + bytes(28) + bytes(4) + bytes(64)
+        + bytes([0x91]) + bytes(8) + b"Pat's C64"),
+]
+
 def device_info() -> bytes:
     p = bytearray()
     p += bytes([RESP_DEVICE_INFO, 13, 175, 40])       # op, fw_ver, contacts/2, channels
@@ -51,7 +76,7 @@ def device_info() -> bytes:
     p += pad(b"15 Sep 2026", 12)                       # build_date
     p += pad(b"Heltec V3", 40)                         # manufacturer -> ~31 nulls
     p += pad(b"v1.0.0-local-0679db", 20)               # fw_version
-    p += bytes([0, 0])                                 # repeat_enabled, path_hash_mode
+    p += bytes([0, PATH_HASH_MODE])                    # repeat_enabled, path_hash_mode
     assert len(p) == 82, len(p)
     return bytes(p)
 
@@ -464,6 +489,15 @@ class Radio:
             fr, bw = struct.unpack("<II", p[1:9])
             self.log.append(f"   [RADIO {fr}kHz bw={bw}Hz sf={p[9]} cr={p[10]}]")
             self.send(bytes([0]))
+        elif op == 61:  # CMD_SET_PATH_HASH_MODE (61, 0, mode)
+            global PATH_HASH_MODE
+            if len(p) >= 3 and p[1] == 0 and p[2] < 3:
+                PATH_HASH_MODE = p[2]
+                self.log.append(f"   [PATH HASH MODE -> {p[2]} ({p[2] + 1} bytes)]")
+                self.send(bytes([0]))
+            else:
+                self.log.append(f"   [PATH HASH MODE bad {p[1:].hex()}]")
+                self.send(bytes([1, 6]))
         elif op == 12:  # CMD_SET_RADIO_TX_POWER
             self.log.append(f"   [TX POWER -> {p[1]} dBm]")
             self.send(bytes([0]))
@@ -507,6 +541,7 @@ def main():
     start = time.time()
     next_msg = start + 15.0
     next_log = start + 8.0
+    n_log = 0
     n = 0
     try:
         while time.time() - start < 400:
@@ -521,9 +556,12 @@ def main():
             if time.time() > next_log:
                 # a ~60-byte raw packet dump, like a real mesh overhearing traffic
                 blob = bytes([PUSH_LOG_RX_DATA, 20, 200]) + bytes(range(60))
+                if _os.environ.get("MC64_LIVEMIX"):
+                    blob = LIVEMIX[n_log % len(LIVEMIX)]
+                n_log += 1
                 r.conn.sendall(wrap(blob))
-                r.log.append("  -> LOG_RX_DATA (63B)")
-                next_log = time.time() + 3.0
+                r.log.append(f"  -> LOG_RX_DATA ({len(blob)}B)")
+                next_log = time.time() + float(_os.environ.get("MC64_LOGINT", "3"))
             # MC64_MSGMAX: go quiet after this many messages. the blank-screen
             # test has to tell "the client repainted the page" apart from "a
             # new message happened to print on that row", so the mesh must be

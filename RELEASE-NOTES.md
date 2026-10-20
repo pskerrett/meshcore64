@@ -1,5 +1,35 @@
-# MeshCore 64 v2.1
+# MeshCore 64 v2.2i
 
+**New since v2.1**
+
+- **F1 > Live dump.** Shows every packet the radio hears: time, type, route, hops, RSSI/SNR, size, to/from or
+  channel hash, advert key/kind/name, transport code and path. Full 80 column screen in 80 column mode.
+  Keys: SPACE pause, P payload rows as hex + text, T type filter, F1 / RUN-STOP back.
+- **Cartridge lamps.** All six: a sweep when a message comes in, a double flash when one is sent, back-and-forth
+  when a repeater sent yours on, and the unread count in binary when idle, on every screen.
+- **F1 > Stats** shows the program version and the radio firmware.
+- **Radio actions > Path hash** sets 1, 2 or 3-byte path hashes (RETURN steps; saved on the radio).
+
+**Fixed**
+
+- A quote byte in a packet no longer scrambles the colours.
+
+The radio firmware is unchanged (5760 baud). This is a test build: the new screens are tested in VICE and on
+the author's hardware, but the EasyFlash image is still VICE-only.
+
+The C64 client for MeshCore, rewritten in machine language with its own 5760-baud RS-232 driver.
+
+**Assets**
+
+- `meshcore64-v2.2i.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
+- `meshcore64-ez-v2.2i.crt` (EasyFlash)
+- `firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin` (flash at 0x0), `...-app.bin`
+
+Radio and client must both be the 5760 versions. Full documentation: README.
+
+---
+
+## Earlier: v2.1
 **New**
 
 - **Timestamps.** Each message's time sits on the rule above it, in light grey: `09:41` today,
