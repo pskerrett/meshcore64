@@ -26,6 +26,24 @@ direct messages and a rolling history in main RAM; the program checks for each a
 
 ---
 
+## New features v2.2
+
+- **F1 > Live dump.** Every packet the radio hears, as it arrives: time, type, route (flood or direct), hops,
+  RSSI/SNR, size, the to/from or channel hash, advert key, kind and name, transport code and path.
+  It uses the full 80 column screen in 80 column mode and opens showing all packet types.
+  Keys: **SPACE** pauses, **P** shows payload rows as hex and text (a plain text message reads straight off),
+  **T** filters by type, **F1** or **RUN/STOP** goes back.
+- **Cartridge lamps.** All six lamps on the cartridge now show what is happening, on every screen:
+  a sweep when a message comes in, a double flash when one is sent, back-and-forth when a repeater sent
+  yours on, and the unread count in binary when idle.
+- **F1 > Stats shows versions.** The program's version and the radio's firmware version.
+- **Radio actions > Path hash.** Sets 1, 2 or 3-byte path hashes: RETURN steps through them, and the choice is saved on the radio.
+- **Fixed:** a quote byte in a packet no longer scrambles the screen colours.
+
+The radio firmware is unchanged (5760 baud). Each release adds its own *New features* section below this one.
+
+---
+
 ## A tour
 
 ### Start
