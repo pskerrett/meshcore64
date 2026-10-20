@@ -6447,7 +6447,7 @@ pyastart: .byte 1,0,0,0,0,0,0,0,67,54,52
 pyquery:  .byte 22,3
 pychan:   .byte 31,0
 pytime:   .byte 5
-banner: .text "meshcore 64  v2.2i"
+banner: .text "meshcore 64  v2.2"
         .byte 13,0
 svideo: .text "video    "
         .byte 0

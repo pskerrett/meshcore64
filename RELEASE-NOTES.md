@@ -1,4 +1,4 @@
-# MeshCore 64 v2.2i
+# MeshCore 64 v2.2
 
 **New since v2.1**
 
@@ -21,8 +21,8 @@ The C64 client for MeshCore, rewritten in machine language with its own 5760-bau
 
 **Assets**
 
-- `meshcore64-v2.2i.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
-- `meshcore64-ez-v2.2i.crt` (EasyFlash)
+- `meshcore64-v2.2.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
+- `meshcore64-ez-v2.2.crt` (EasyFlash)
 - `firmware-heltec-v3-ble-5760-v1.17.1-c64-5760-merged.bin` (flash at 0x0), `...-app.bin`
 
 Radio and client must both be the 5760 versions. Full documentation: README.
