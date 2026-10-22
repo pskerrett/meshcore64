@@ -1,4 +1,4 @@
-# MeshCore 64 v2.2.1
+# MeshCore 64 v2.3
 
 **F1 > Live dump is readable now**
 
@@ -22,8 +22,8 @@ Works with either radio firmware: `v1.18.0-c64-5760` (current) or `v1.17.1-c64-5
 
 **Assets**
 
-- `meshcore64-v2.2.1.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
-- `meshcore64-ez-v2.2.1.crt` (EasyFlash)
+- `meshcore64-v2.3.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
+- `meshcore64-ez-v2.3.crt` (EasyFlash)
 - Radio firmware, MeshCore 1.18.0: `firmware-heltec-v3-ble-5760-v1.18.0-c64-5760-merged.bin` (flash at 0x0), `...-app.bin`, and the source patch
 - The previous firmware, MeshCore 1.17.1 (`...v1.17.1-c64-5760...`), and its patch
 
