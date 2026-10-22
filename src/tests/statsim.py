@@ -17,7 +17,7 @@ def w32(m, a, v):
 def lines(m):
     out = []
     for i in range(m.mem[A("PLN")]):
-        out.append(B.petscii(bytes(m.mem[A("PLBUF") + 32 * i + j] for j in range(32))).replace("\0", "").rstrip().lower())
+        out.append(B.petscii(bytes(m.mem[A("PLBUF") + 32 * i + j] for j in range(32))).split("\0")[0].rstrip().lower())
     return out
 def off(ucok, utcoff, now, rtc_local):
     m = B.M(mm, code, syms, prg)

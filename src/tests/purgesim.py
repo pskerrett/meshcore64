@@ -60,7 +60,7 @@ def run(days_text, contacts, replies, tsok=1, maxcon=160):
         assert n < 5000000, "hung"
     lines = []
     for i in range(m.mem[A("PLN")]):
-        lines.append(B.petscii(bytes(m.mem[A("PLBUF") + 32 * i + j] for j in range(32))).replace("\0", "").rstrip().lower())
+        lines.append(B.petscii(bytes(m.mem[A("PLBUF") + 32 * i + j] for j in range(32))).split("\0")[0].rstrip().lower())
     return m, sent, lines
 K = [bytes([0x10 * k + j for j in range(32)]) for k in range(9)]
 old, new, cut = NOW - 60 * DAY, NOW - 2 * DAY, NOW - 30 * DAY

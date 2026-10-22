@@ -18,13 +18,13 @@ class M:
         self.mem = ObservableMemory()
         for i, b in enumerate(code):
             self.mem[mod.ORG + i] = b
-        for i, b in enumerate(code2):
-            self.mem[0xA000 + i] = b
         if hasattr(mod, "S3ORG"):
             for i, b in enumerate(prg[2 + (mod.S3ORG - mod.ORG):]):
                 self.mem[mod.S3ORG + i] = b
         if hasattr(mod, "S4ORG"):        # segment 4: as main copies it after the splash
             tail4 = prg[2 + (mod.S4IMG - mod.ORG):]
+            if getattr(mod, "SEG8", b""):   # v2.2: segment 8's pages close the image
+                tail4 = tail4[:-(256 * mod.S8PG)]
             if getattr(mod, "SEG7", b""):   # v2.1: segment 7's page closes the image
                 tail4 = tail4[:-256]
             if getattr(mod, "SEG6", b""):   # v2.1: then segment 6's pages
@@ -42,6 +42,13 @@ class M:
         if getattr(mod, "SEG7", b""):    # segment 7, as main copies it to $0340
             for i, b in enumerate(mod.SEG7):
                 self.mem[mod.S7ORG + i] = b
+        if getattr(mod, "SEG8", b""):    # segment 8 (v2.2), under the KERNAL
+            for i, b in enumerate(mod.SEG8):
+                self.mem[mod.S8ORG + i] = b
+        # segment 2 last, as main copies it: the image runs past $a000 now
+        # (v2.2.1), and loading it first let the tail of the PRG overwrite it
+        for i, b in enumerate(code2):
+            self.mem[0xA000 + i] = b
         self.uci = uci_text
         self.mem.subscribe_to_read(range(0xDF1C, 0xDF20), self.rd)
         self.mem.subscribe_to_write(range(0xDF1C, 0xDF20), self.wr)

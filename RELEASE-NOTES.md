@@ -1,4 +1,37 @@
-# MeshCore 64 v2.2
+# MeshCore 64 v2.2.1
+
+**F1 > Live dump is readable now**
+
+- **Message text.** DMs and channel messages are encrypted on the air, so their bytes can never be read
+  directly. The radio decrypts every message it has a key for, and the dump now prints that text on its
+  own line, e.g. `[#test] W9PDS-BOT: ack`. On a busy mesh the text can arrive a few packets after its packet.
+- **Words, not codes.** `Channel msg flood, 3 hops -50 dBm SNR 12.3 40 bytes` instead of `GRP FL h3`.
+  Packet types, adverts (`repeater "W9PDS-rpt" key 3A7F19C2`), acks and region codes are spelled out.
+- **Node names.** The to/from and every repeater in the path are shown by name when exactly one node in
+  your list matches the hash (up to 14 per packet); unknown or ambiguous hashes stay in hex.
+- **T hides types.** The dump opens showing everything. T pauses it and lists the five types
+  (`1 adverts:on 2 channel:on 3 direct:on 4 acks:on 5 other:on`); 1-5 hide or show one, any other key
+  carries on. Hidden types reset the next time you open the dump.
+- **P (payload)** marks encrypted payloads as encrypted and shows their bytes as hex only.
+
+**Fixed**
+
+- SNR decimals in the Live dump were wrong (6.0 showed as 6.3, 6.5 as 6.8).
+
+Works with either radio firmware: `v1.18.0-c64-5760` (current) or `v1.17.1-c64-5760`.
+
+**Assets**
+
+- `meshcore64-v2.2.1.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
+- `meshcore64-ez-v2.2.1.crt` (EasyFlash)
+- Radio firmware, MeshCore 1.18.0: `firmware-heltec-v3-ble-5760-v1.18.0-c64-5760-merged.bin` (flash at 0x0), `...-app.bin`, and the source patch
+- The previous firmware, MeshCore 1.17.1 (`...v1.17.1-c64-5760...`), and its patch
+
+Radio and client must both be the 5760 versions. Full documentation: README.
+
+---
+
+## Earlier: v2.2
 
 This release includes everything new since v2.0.2, which covers v2.1 and v2.2.
 

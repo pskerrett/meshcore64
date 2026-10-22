@@ -1,7 +1,7 @@
 # MeshCore 64
 
 **A Commodore 64 chat client for the [MeshCore](https://github.com/meshcore-dev/MeshCore) LoRa mesh.**
-Version 2.2. Machine language, 5760 baud, all of it running on a stock C64.
+Version 2.2.1. Machine language, 5760 baud, all of it running on a stock C64.
 
 <p align="center"><img src="docs/images/meshcore64-demo.gif" alt="MeshCore 64 in action" width="768"></p>
 
@@ -49,6 +49,23 @@ Includes everything since v2.0.2 (v2.1 and v2.2).
 - **Changed:** up to 234 nodes with an REU or GeoRAM (96 without); the node list reloads once in the background on first start.
 
 The radio firmware is unchanged (5760 baud). Each release adds its own *New features* section below this one.
+
+## New features v2.2.1
+
+**F1 > Live dump is readable now.**
+
+- **Message text.** DMs and channel messages are encrypted on the air, so their bytes can never be read
+  directly. The radio decrypts every message it has a key for, and the dump now prints that text on its
+  own line, e.g. `[#test] W9PDS-BOT: ack`. On a busy mesh the text can arrive a few packets after its packet.
+- **Words, not codes.** `Channel msg flood, 3 hops -50 dBm SNR 12.3 40 bytes` instead of `GRP FL h3`.
+  Packet types, adverts (`repeater "W9PDS-rpt" key 3A7F19C2`), acks and region codes are spelled out.
+- **Node names.** The to/from and every repeater in the path are shown by name when exactly one node in
+  your list matches the hash (up to 14 per packet); unknown or ambiguous hashes stay in hex.
+- **T hides types.** The dump opens showing everything. T pauses it and lists the five types
+  (`1 adverts:on 2 channel:on 3 direct:on 4 acks:on 5 other:on`); 1-5 hide or show one, any other key
+  carries on. Hidden types reset the next time you open the dump.
+- **P (payload)** marks encrypted payloads as encrypted and shows their bytes as hex only, without a column of noise.
+- **Fixed:** SNR decimals were wrong (6.0 showed as 6.3, 6.5 as 6.8).
 
 ---
 
@@ -216,11 +233,11 @@ that still works. MeshCore 64 reads the channels that are on the radio and can a
 
 | file | how |
 |---|---|
-| `meshcore64-v2.2.prg` | load it from anything: an Ultimate, SD2IEC, `LOAD"*",8,1` and `RUN` |
-| `meshcore64-v2.2.d64` | a disk image: `LOAD"MESHCORE64",8` then `RUN` |
-| `meshcore64-v2.2.crt` | a cartridge image (Magic Desk, 64K): runs the moment you switch on |
-| `meshcore64-v2.2.bin` | the same cartridge as a flat 64K image for a **27C512** EPROM |
-| `meshcore64-ez-v2.2.crt` | **MeshCore 64 EZ**: the same program on an **EasyFlash** cartridge ([details](#meshcore-64-ez-easyflash)) |
+| `meshcore64-v2.2.1.prg` | load it from anything: an Ultimate, SD2IEC, `LOAD"*",8,1` and `RUN` |
+| `meshcore64-v2.2.1.d64` | a disk image: `LOAD"MESHCORE64",8` then `RUN` |
+| `meshcore64-v2.2.1.crt` | a cartridge image (Magic Desk, 64K): runs the moment you switch on |
+| `meshcore64-v2.2.1.bin` | the same cartridge as a flat 64K image for a **27C512** EPROM |
+| `meshcore64-ez-v2.2.1.crt` | **MeshCore 64 EZ**: the same program on an **EasyFlash** cartridge ([details](#meshcore-64-ez-easyflash)) |
 
 The cartridge copies the program into RAM and starts it, so after that it is the same program.
 Every format is **the same program**: the PRG, the D64, both cartridge images and the EasyFlash image all
@@ -229,12 +246,12 @@ PRG, D64 and Magic Desk cartridge detect both). The cartridge is only a differen
 
 ### Making a cartridge
 
-**Ultimate II+ and similar:** copy `meshcore64-v2.2.crt` to the device and run it. Nothing to build.
+**Ultimate II+ and similar:** copy `meshcore64-v2.2.1.crt` to the device and run it. Nothing to build.
 
-**Your own EPROM cartridge:** burn `meshcore64-v2.2.bin` to a **27C512** (64K). It is one flat image,
+**Your own EPROM cartridge:** burn `meshcore64-v2.2.1.bin` to a **27C512** (64K). It is one flat image,
 the eight 8K banks end to end, and the unused tail is `$FF` (erased state). The `.crt` is the same
 contents in the container emulators expect: it is **Magic Desk** (cartridge type 19), so VICE
-runs it too (`x64sc -cartcrt meshcore64-v2.2.crt`).
+runs it too (`x64sc -cartcrt meshcore64-v2.2.1.crt`).
 
 | | |
 |---|---|
@@ -265,7 +282,7 @@ the program.
 
 ### MeshCore 64 EZ (EasyFlash)
 
-**`meshcore64-ez-v2.2.crt`** is MeshCore 64 2.2 for an **EasyFlash** cartridge (CRT type 32), such as an
+**`meshcore64-ez-v2.2.1.crt`** is MeshCore 64 2.2.1 for an **EasyFlash** cartridge (CRT type 32), such as an
 EasyFlash 3, or for an Ultimate II+ running an EasyFlash cartridge image. It is the same program,
 byte for byte, as the cartridge build above; only the cartridge wrapper differs. Nothing in the
 program changed and it never writes to the flash.
@@ -321,7 +338,7 @@ Everything is built by Python scripts; there are no other dependencies than VICE
 `c1541` for the cartridge and disk images.
 
 ```bash
-src/build.sh            # -> release/meshcore64-v2.2.{prg,crt,bin,d64}; byte-identical to the published files
+src/build.sh            # -> release/meshcore64-v2.2.1.{prg,crt,bin,d64}; byte-identical to the published files
 pip install py65
 src/tests/run-sims.sh   # the 6502 simulator suites
 ```
