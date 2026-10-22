@@ -64,7 +64,14 @@ The radio firmware is unchanged (5760 baud). Each release adds its own *New feat
 - **T hides types.** The dump opens showing everything. T pauses it and lists the five types
   (`1 adverts:on 2 channel:on 3 direct:on 4 acks:on 5 other:on`); 1-5 hide or show one, any other key
   carries on. Hidden types reset the next time you open the dump.
-- **P (payload)** marks encrypted payloads as encrypted and shows their bytes as hex only, without a column of noise.
+- **Repeats collapse.** The same packet heard again within 10 seconds (a flood passed on by another
+  repeater) prints one line under the first, `heard x2 via ORD-LISLE-EGG-RO -48 dBm`, instead of a new block.
+- **Channels by name and colour.** The first time the dump opens after a boot it works out each channel's
+  hash (about 0.6 s a channel, shown as `-- [#bot] is channel CA --`). Packets on your channels then say
+  `[#bot]` in that channel's colour, and its decrypted text uses the same colour. **C** cycles all channels,
+  then each one alone. The channel secrets this needs are kept in the GeoRAM or REU when there is one,
+  else in main RAM.
+- **P (payload)** is off whenever the dump opens; it marks encrypted payloads as encrypted and shows their bytes as hex only, without a column of noise.
 - **Fixed:** SNR decimals were wrong (6.0 showed as 6.3, 6.5 as 6.8).
 
 ---

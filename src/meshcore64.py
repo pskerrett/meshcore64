@@ -241,6 +241,7 @@ EQU = {
     # the radio panel needs ten once the two advert lines are in it.
     "LOGODAT": 0x6800,   # s14: splash RLE data, loaded here, read once
     "PLBUF":   0x9E40,
+    "CHSECR":  0xE000,   # Live dump: the channel secrets, 40 x 16, with no REU/GeoRAM (under the KERNAL)
     "LDBUF":   0x9CC0,   # Live dump: one packet's text, <= 496 bytes (NODETAB/NODEIX/PLSTAT: free while it runs)
     "PLSTAT":  0x9E00,   # Stats: 14 lines from here (NODEIX's second half, rebuilt by ndview)
     "TSTR":    0x9FC0,   # s14: a time line being built, 40 bytes
@@ -3663,6 +3664,8 @@ rcl:    cpy #17
         jmp rcl
 rcend:  lda #0
         sta (PTR),y
+        ldx #K8CHSV             ; and its secret, for the Live dump's channel
+        jsr kcall               ; names (GeoRAM / REU when there is one)
 rcrt:   rts
 
 ; ===== keyboard ========================================================
@@ -8783,7 +8786,11 @@ ldump:  lda #1
         jsr k80c                ; 80 columns: the real 80 column screen, not
         ldx #K8LDINI            ; the menu's 40 column mirror (K40)
         jsr ldcall
-ldl:    jsr poll
+ldl:    lda LDHMORE             ; channel hashes still to work out: one a
+        beq ldl0                ; pass (~0.6 s each), the first visit only
+        ldx #K8LDHSH
+        jsr ldcall
+ldl0:   jsr poll
         lda READY
         beq ldk
         lda BUF
@@ -8836,6 +8843,7 @@ ldpr:   ldy #0
         bne ldpr
 ldprx:  rts
 LDEXIT: .byte 0
+LDHMORE: .byte 0                ; channel hashes to work out (segment 8 sets it)
 milive: .text "Live dump"
         .byte 0
 
@@ -10051,8 +10059,8 @@ k8disp: lda k8hi,x              ; the table holds address - 1: RTS jumps
         lda k8lo,x
         pha
         rts
-k8lo:   .byte <stver-1,<hashch-1,<ldini-1,<ldpkt-1,<ldkey-1,<ldtxt-1
-k8hi:   .byte >stver-1,>hashch-1,>ldini-1,>ldpkt-1,>ldkey-1,>ldtxt-1
+k8lo:   .byte <stver-1,<hashch-1,<ldini-1,<ldpkt-1,<ldkey-1,<ldtxt-1,<ldhsh-1,<chsv-1
+k8hi:   .byte >stver-1,>hashch-1,>ldini-1,>ldpkt-1,>ldkey-1,>ldtxt-1,>ldhsh-1,>chsv-1
 ; The NMI with the KERNAL out: the same SEI + JMP ($0318) as its $fe43, so
 ; the serial driver's timing does not change.
 k8nmi:  sei
@@ -10100,17 +10108,27 @@ ldini:  lda #0
         sta LDCHO
         sta LDSKP
         sta LDEXIT
+        sta LDHEX               ; payload hex off until P
+        ldx #7
+ldi0:   sta DRC,x               ; no packets heard yet
+        dex
+        bpl ldi0
+        lda #255
+        sta LDCSEL              ; every channel
+        lda #1
+        sta LDHMORE
         jsr ldbeg
         lda #147
         jsr ldraw
         lda #<ldhdr
         ldx #>ldhdr
         jsr ldstr
-        lda #37                 ; the keys: beside the title in 80 columns,
-        jsr ldfit               ; under it in 40
-        lda #<ldhlp
-        ldx #>ldhlp
-        jsr ldstr
+        lda #<ldhlp             ; the keys: beside the title in 80 columns,
+        ldx #>ldhlp             ; under it in 40
+        jsr ldfs
+        lda #<ldhlp2
+        ldx #>ldhlp2
+        jsr ldfs
         jsr ldnl
         jmp ldend
 
@@ -10131,6 +10149,8 @@ ldkey:  jsr ldbeg
         beq ldkh
         cmp #84                 ; t / T
         beq ldkt
+        cmp #67                 ; c / C
+        beq ldkch
         jmp ldend
 ldkx:   inc LDEXIT
         jmp ldend
@@ -10236,6 +10256,43 @@ ldhs3:  jsr ldstr
         ldx #>lmdsh
         jsr ldstr
         jmp ldnl
+; C: every channel, then each named one alone, then every channel again
+ldkch:  ldx LDCSEL
+ldkc5:  inx
+        cpx #40
+        bcs ldkc7
+        txa
+        jsr ldcnp
+        ldy #0
+        lda (SPL),y
+        beq ldkc5
+        stx LDCSEL
+        lda #<lmchn
+        ldx #>lmchn
+        jsr ldmsg
+        lda #<lmonly
+        ldx #>lmonly
+        jsr ldstr
+        lda LDCSEL
+        jsr ldchn
+        jmp ldkc8
+ldkc7:  lda #255
+        sta LDCSEL
+        lda #<lmchn
+        ldx #>lmchn
+        jsr ldmsg
+        lda #<lmall
+        ldx #>lmall
+        jsr ldstr
+ldkc8:  lda #152
+        jsr ldraw
+        lda #2
+        jsr ldfit
+        lda #<lmdsh
+        ldx #>lmdsh
+        jsr ldstr
+        jsr ldnl
+        jmp ldend
 ; a status line: grey, "-- " and the text at A/X
 ldmsg:  pha
         txa
@@ -10304,6 +10361,30 @@ ldp5:   clc
         dey
         bne ldp5
 ldp6:   sta LDPI
+; --- a channel packet: which of ours (its hash) and is C showing it ---
+        lda #255
+        sta LDCS
+        lda LDTY
+        cmp #5                  ; channel msg, channel data
+        bcc ldcs1
+        cmp #7
+        bcs ldcs1
+        ldx LDPI
+        cpx FLEN
+        bcs ldcs1
+        lda BUF,x
+        jsr ldchf
+        lda LDCSEL
+        cmp #255
+        beq ldcs1
+        cmp LDCS
+        beq ldcs1
+        jmp ldend
+; --- heard again (the same payload through another repeater): one line ---
+ldcs1:  jsr lddup
+        bcc ldcs2
+        jmp ldend
+ldcs2:
 ; --- the time ---
         lda #155
         jsr ldraw
@@ -10320,10 +10401,15 @@ ldtm2:  jsr ldch
         lda #14                 ; names for at most 14 hashes a packet (a 12-hop
         sta LDLK                ; path, to and from): each one is a pass over
                                 ; the contacts with IRQs off, ~9 ms at 234
-; --- type, in its colour, in words ---
+; --- type, in its colour (a channel of ours: the channel's), in words ---
         ldx LDTY
         lda ldtcol,x
-        jsr ldraw
+        ldy LDCS
+        cpy #255
+        beq ldty0
+        jsr ldccl
+ldty0:  jsr ldraw
+        ldx LDTY
         lda ldtlo,x
         pha
         lda ldthi,x
@@ -10436,8 +10522,15 @@ ldd1a:  ldx LDPI
         inx
         jsr ldkey4
         jmp ldpath
-ldd2:   lda #10                 ; group: the channel hash (the radio names
-        jsr ldfit               ; the channel when it can read the message)
+ldd2:   lda LDCS                ; group: one of ours by name, in its colour,
+        cmp #255                ; else the channel hash
+        beq ldd2h
+        jsr ldchn
+        lda #5
+        jsr ldraw
+        jmp ldpath
+ldd2h:  lda #10
+        jsr ldfit
         lda #<ldchs
         ldx #>ldchs
         jsr ldstr
@@ -10674,7 +10767,14 @@ ldtx1:  ldy #2                  ; hidden with its type: channel, or direct
 ldtx3:  lda ldbit,y
         and LDHID
         bne ldtxx
-        lda #1                  ; the DM's sender
+        cpy #2                  ; a channel's text: is C showing it?
+        bne ldtx4
+        lda LDCSEL
+        cmp #255
+        beq ldtx4
+        cmp BUF+4
+        bne ldtxx
+ldtx4:  lda #1                  ; the DM's sender
         sta LDLK
         lda #32                 ; indent two (the second space: ldname's fit)
         jsr ldch
@@ -10702,63 +10802,14 @@ ldtx3:  lda ldbit,y
         lda #0                  ; no sender in the text itself
         beq ldtxb
 ; channel: the index at 4, the text ("sender: text") from 11
-ldtch:  lda #32
-        jsr ldch
-        lda FLEN
+ldtch:  lda FLEN
         cmp #12
-        bcc ldtxx
+        bcc ldtx5
         lda BUF+4
         cmp #40
-        bcs ldtxx
-        sta SPL                 ; CHNAM + index * 18
-        lda #0
-        sta SPH
-        lda SPL
-        asl
-        sta LDN2                ; index * 2
-        asl
-        rol SPH
-        asl
-        rol SPH
-        asl
-        rol SPH                 ; index * 16
-        clc
-        adc LDN2
-        sta SPL
-        lda SPH
-        adc #0
-        sta SPH
-        lda SPL
-        clc
-        adc #<CHNAM
-        sta SPL
-        lda SPH
-        adc #>CHNAM
-        sta SPH
-        lda #158
-        jsr ldraw
-        lda #91                 ; [
-        jsr ldch
-        ldy #0
-ldtc3:  lda (SPL),y             ; PETSCII -> ASCII for ldch
-        beq ldtc6
-        cmp #65
-        bcc ldtc5
-        cmp #91
-        bcs ldtc4
-        ora #32
-        bne ldtc5
-ldtc4:  cmp #193
-        bcc ldtc5
-        cmp #219
-        bcs ldtc5
-        and #127
-ldtc5:  jsr ldch
-        iny
-        cpy #18
-        bcc ldtc3
-ldtc6:  lda #93                 ; ]
-        jsr ldch
+        bcc ldtx6
+ldtx5:  jmp ldend
+ldtx6:  jsr ldchn               ; [name], in the channel's colour
         ldx #11
         lda #1                  ; the sender comes first, up to its colon
 ldtxb:  sta LDN2
@@ -10787,6 +10838,406 @@ ldtxf:  inx
         jmp ldtxd
 ldtxe:  jsr ldnl
         jmp ldend
+
+; ---- channels: names, colours, hashes ----
+; SPL/SPH -> CHNAM + A * 18 (the slot's PETSCII name); X is kept
+ldcnp:  stx LDCX2
+        sta SPL
+        lda #0
+        sta SPH
+        lda SPL
+        asl
+        sta LDN2                ; index * 2
+        asl
+        rol SPH
+        asl
+        rol SPH
+        asl
+        rol SPH                 ; index * 16
+        clc
+        adc LDN2
+        sta SPL
+        lda SPH
+        adc #0
+        sta SPH
+        lda SPL
+        clc
+        adc #<CHNAM
+        sta SPL
+        lda SPH
+        adc #>CHNAM
+        sta SPH
+        ldx LDCX2
+        rts
+; A = the colour of channel slot Y
+ldccl:  tya
+        and #7
+        tay
+        lda ldccol,y
+        rts
+; "[name]" of channel slot A, in its colour, as one field
+ldchn:  sta LDCX
+        jsr ldcnp
+        ldy #0
+ldcn1:  lda (SPL),y
+        beq ldcn2
+        iny
+        cpy #18
+        bcc ldcn1
+ldcn2:  tya
+        clc
+        adc #2
+        jsr ldfit
+        ldy LDCX
+        jsr ldccl
+        jsr ldraw
+        lda #91                 ; [
+        jsr ldch
+        ldy #0
+ldcn3:  lda (SPL),y             ; PETSCII -> ASCII for ldch
+        beq ldcn6
+        cmp #65
+        bcc ldcn5
+        cmp #91
+        bcs ldcn4
+        ora #32
+        bne ldcn5
+ldcn4:  cmp #193
+        bcc ldcn5
+        cmp #219
+        bcs ldcn5
+        and #127
+ldcn5:  jsr ldch
+        iny
+        cpy #18
+        bcc ldcn3
+ldcn6:  lda #93                 ; ]
+        jmp ldch
+; LDCS = the named slot whose hash is A, else 255
+ldchf:  sta LDN3
+        ldx #0
+ldcf1:  lda CHHOK,x
+        beq ldcf2
+        lda CHHASH,x
+        cmp LDN3
+        bne ldcf2
+        txa
+        jsr ldcnp
+        ldy #0
+        lda (SPL),y
+        bne ldcf3
+ldcf2:  inx
+        cpx #40
+        bcc ldcf1
+        ldx #255
+ldcf3:  stx LDCS
+        rts
+
+; ---- K8LDHSH: the next channel whose hash is still unknown ----
+; A channel packet carries sha256(secret)[0]. One SHA-256 is ~0.6 s here, so
+; the dump loop asks for one at a time: "-- [#bot] is channel CA --".
+ldhsh:  jsr ldbeg
+        lda #0
+        sta LDHMORE
+        ldx #0
+lhq1:   lda CHSOK,x
+        beq lhq2
+        lda CHHOK,x
+        bne lhq2
+        txa
+        jsr ldcnp
+        ldy #0
+        lda (SPL),y
+        bne lhq3
+lhq2:   inx
+        cpx #40
+        bcc lhq1
+        jmp ldend               ; none left
+lhq3:   jsr chhash
+        lda #1                  ; perhaps another: the next pass looks
+        sta LDHMORE
+        lda #<lmdsh
+        ldx #>lmdsh
+        jsr ldmsg
+        lda LDCX3
+        jsr ldchn
+        lda #152
+        jsr ldraw
+        lda #<lmisch
+        ldx #>lmisch
+        jsr ldfs
+        lda #2
+        jsr ldfit
+        ldx LDCX3
+        lda CHHASH,x
+        jsr ldhx
+        lda #2
+        jsr ldfit
+        lda #<lmdsh
+        ldx #>lmdsh
+        jsr ldstr
+        jsr ldnl
+        jmp ldend
+; X = slot: CHHASH = sha256(its secret)[0]; SECBUF is kept
+chhash: stx LDCX3
+        ldx #15
+chh1:   lda SECBUF,x
+        sta LDSV,x
+        dex
+        bpl chh1
+        ldx #63                 ; the message block
+        lda #0
+chh2:   sta h2v+128,x
+        dex
+        bpl chh2
+        lda #<h2v+128
+        sta PTR
+        lda #>h2v+128
+        sta PTRH
+        lda #1                  ; secret -> the block
+        sta CSDIR
+        lda LDCX3
+        jsr chsxf
+        ldx #16                 ; 16 bytes: hash them
+        jsr h2cd
+        ldx LDCX3
+        lda SECBUF
+        sta CHHASH,x
+        lda #1
+        sta CHHOK,x
+        ldx #15
+chh3:   lda LDSV,x
+        sta SECBUF,x
+        dex
+        bpl chh3
+        rts
+
+; ---- K8CHSV: CHANNEL_INFO in BUF -> keep its secret (BUF+34, 16 bytes) ----
+chsv:   lda FLEN
+        cmp #50
+        bcc chsvx
+        lda PTR
+        pha
+        lda PTRH
+        pha
+        lda #<BUF+34
+        sta PTR
+        lda #>BUF+34
+        sta PTRH
+        lda #0
+        sta CSDIR
+        lda BUF+1
+        jsr chsxf
+        ldx BUF+1
+        lda #1
+        sta CHSOK,x
+        lda #0                  ; a new secret wants a new hash
+        sta CHHOK,x
+        pla
+        sta PTRH
+        pla
+        sta PTR
+chsvx:  rts
+; 16 bytes between RAM at PTR and channel slot A's secret: CSDIR 0 = keep
+; (RAM -> store), 1 = fetch. The store: GeoRAM block 0 pages 5-7 (page 0 is
+; the header, 1-4 the channel names), the REU's persist pages 64-66 (after
+; the node table), or main RAM at CHSECR.
+chsxf:  sta CSLOT
+        lda #0
+        sta CSHI
+        lda CSLOT
+        ldx #4
+chsx0:  asl                     ; slot * 16, all 16 bits (slots 32-39 used
+        rol CSHI                ; to land on 0-7): CSHI = page, A = offset
+        dex
+        bne chsx0
+        sta CSLO
+        lda RU
+        cmp #2
+        beq chsg
+        cmp #1
+        beq chsr
+        lda CSLO
+        clc
+        adc #<CHSECR
+        sta SPL
+        lda CSHI
+        adc #>CHSECR
+        sta SPH
+        ldy #15
+chsm:   lda CSDIR
+        bne chsm1
+        lda (PTR),y
+        sta (SPL),y
+        jmp chsm2
+chsm1:  lda (SPL),y
+        sta (PTR),y
+chsm2:  dey
+        bpl chsm
+        rts
+chsg:   lda #0
+        sta GEOBK
+        lda CSHI
+        clc
+        adc #5
+        sta GEOPG
+        ldx CSLO
+        ldy #0
+chsg1:  lda CSDIR
+        bne chsg2
+        lda (PTR),y
+        sta GEOWIN,x
+        jmp chsg3
+chsg2:  lda GEOWIN,x
+        sta (PTR),y
+chsg3:  inx
+        iny
+        cpy #16
+        bcc chsg1
+        rts
+chsr:   lda #144                ; $90 c64 -> reu
+        ldx CSDIR
+        beq chsr1
+        lda #145                ; $91 reu -> c64
+chsr1:  sta DCMD
+        lda #16
+        sta GLENL
+        lda #0
+        sta GLENH
+        lda CSHI
+        clc
+        adc #64
+        tax
+        ldy CSLO
+        jsr rpad
+        jmp rpbig
+
+; ---- the same packet again: payload fingerprints for ten seconds ----
+; A flood is heard once per repeater that passes it on: same type, same
+; payload, a longer path. Carry set: a repeat -- its "heard x2" line is done.
+lddup:  lda LDTY
+        sta DF1
+        lda #0
+        sta DF2
+        ldx LDPI
+ldu1:   cpx FLEN
+        bcs ldu2
+        lda BUF,x
+        clc
+        adc DF1
+        sta DF1
+        clc
+        adc DF2
+        sta DF2
+        inx
+        bne ldu1
+ldu2:   lda FLEN
+        sec
+        sbc LDPI
+        sta DFL
+        lda JIFFY               ; now, in jiffies ($a1:$a2)
+        sta DTL
+        lda JIFFY-1
+        sta DTH
+        ldx #7
+ldu3:   lda DRC,x
+        beq ldu4
+        lda DRL,x
+        cmp DFL
+        bne ldu4
+        lda DRF1,x
+        cmp DF1
+        bne ldu4
+        lda DRF2,x
+        cmp DF2
+        bne ldu4
+        lda DTL                 ; how long ago: now - then < 600 (10 s)
+        sec
+        sbc DRTL,x
+        sta DAGE
+        lda DTH
+        sbc DRTH,x
+        cmp #>600
+        bcc ldu5
+        bne ldu4
+        lda DAGE
+        cmp #<600
+        bcc ldu5
+ldu4:   dex
+        bpl ldu3
+        ldx DRI                 ; new: into the ring
+        lda DFL
+        sta DRL,x
+        lda DF1
+        sta DRF1,x
+        lda DF2
+        sta DRF2,x
+        lda DTL
+        sta DRTL,x
+        lda DTH
+        sta DRTH,x
+        lda #1
+        sta DRC,x
+        inx
+        txa
+        and #7
+        sta DRI
+        clc
+        rts
+ldu5:   lda DTL                 ; heard again: count it, from now
+        sta DRTL,x
+        lda DTH
+        sta DRTH,x
+        inc DRC,x
+        bne ldu6
+        dec DRC,x
+ldu6:   lda DRC,x
+        sta DCNT
+        lda #152                ; "  heard x2 via ORD-LISLE-EGG-RO -52 dBm"
+        jsr ldraw
+        lda #32
+        jsr ldch
+        lda #10
+        jsr ldfit
+        lda #<lmhrd
+        ldx #>lmhrd
+        jsr ldstr
+        lda DCNT
+        jsr lddec
+        lda LDRT                ; a flood: the repeater it came from
+        cmp #2
+        bcs ldu7
+        lda LDPC
+        beq ldu7
+        lda #1
+        sta LDLK
+        lda #<ldvia
+        ldx #>ldvia
+        jsr ldpre
+        lda LDPC                ; the last hop: pl + 1 + (hops - 1) * size
+        sta LDN3
+        lda LDPL
+        clc
+        adc #1
+        ldy LDN3
+ldu8:   dey
+        beq ldu9
+        clc
+        adc LDPS
+        jmp ldu8
+ldu9:   tax
+        lda LDPS
+        jsr ldname
+ldu7:   lda #8
+        jsr ldfit
+        lda BUF+2
+        jsr ldsdec
+        lda #<ldbm
+        ldx #>ldbm
+        jsr ldstr
+        jsr ldnl
+        sec
+        rts
 
 ; the string at A/X as one field: it moves to a new line rather than split
 ldfs:   sta SPL
@@ -11128,7 +11579,9 @@ ldd15:  pla
 ldhdr:  .byte 18
         .text " Live dump "
         .byte 146,152,0
-ldhlp:  .text "SPACE pause P payload T types F1 back"
+ldhlp:  .text "SPACE pause P payload T types"
+        .byte 0
+ldhlp2: .text "C channels F1 back"
         .byte 0
 ldnot:  .text "--:--:--"
 ; the types in words
@@ -11186,6 +11639,8 @@ lfn4:   .text "acks"
         .byte 0
 lfn5:   .text "other"
         .byte 0
+; channel colours, by slot & 7 (white is the text, grey the status lines)
+ldccol: .byte 159,158,153,129,156,150,154,30
 ; advert kinds
 ldklo:  .byte <ldk0,<ldk1,<ldk2,<ldk3,<ldk4
 ldkhi:  .byte >ldk0,>ldk1,>ldk2,>ldk3,>ldk4
@@ -11250,6 +11705,16 @@ lmcho:  .text "-- hide/show: 1-5, other key: done --"
         .byte 0
 lmdsh:  .text "--"
         .byte 0
+lmchn:  .text "-- channels: "
+        .byte 0
+lmonly: .text "only"
+        .byte 0
+lmall:  .text "all"
+        .byte 0
+lmisch: .text "is channel"
+        .byte 0
+lmhrd:  .text "heard x"
+        .byte 0
 lmon2:  .text "on"
         .byte 0
 lmoff2: .text "off"
@@ -11288,13 +11753,46 @@ LDN2:   .byte 0
 LDQL:   .byte 0
 LDQH:   .byte 0
 LDQN:   .byte 0
+LDCSEL: .byte 255
+LDCS:   .byte 255
+LDCX:   .byte 0
+LDCX2:  .byte 0
+LDCX3:  .byte 0
+LDN3:   .byte 0
+CSLOT:  .byte 0
+CSLO:   .byte 0
+CSHI:   .byte 0
+CSDIR:  .byte 0
+DF1:    .byte 0
+DF2:    .byte 0
+DFL:    .byte 0
+DTL:    .byte 0
+DTH:    .byte 0
+DAGE:   .byte 0
+DCNT:   .byte 0
+DRI:    .byte 0
+DRC:    .byte 0,0,0,0,0,0,0,0
+DRL:    .byte 0,0,0,0,0,0,0,0
+DRF1:   .byte 0,0,0,0,0,0,0,0
+DRF2:   .byte 0,0,0,0,0,0,0,0
+DRTL:   .byte 0,0,0,0,0,0,0,0
+DRTH:   .byte 0,0,0,0,0,0,0,0
+LDSV:   .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+; per channel slot: secret kept (CHSOK), hash worked out (CHHOK), the hash
+CHSOK:  .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+        .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+CHHOK:  .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+        .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+CHHASH: .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+        .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 LDH0:   .byte 0
 LDHB:   .byte 0
 LDHX:   .byte 0
 LDMP:   .byte 0
 LDMPH:  .byte 0
 """
-K8 = {"K8STVER": 0, "K8HASH": 1, "K8LDINI": 2, "K8LDPKT": 3, "K8LDKEY": 4, "K8LDTXT": 5}
+K8 = {"K8STVER": 0, "K8HASH": 1, "K8LDINI": 2, "K8LDPKT": 3, "K8LDKEY": 4, "K8LDTXT": 5,
+      "K8LDHSH": 6, "K8CHSV": 7}
 SRC8 += "\n; ===== sha256 (#hashtag channel keys), segment 8 since v2.2 =====\n" + sha256_6502.source()
 SRC6 = r"""
 ; ===== segment 6 (v2.1): timestamps, the alert sound, Settings ==========
@@ -14906,6 +15404,8 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
     prg += bytes(S7ORG - 0x0300) + SEG7 + bytes(S7MAX - S7ORG - len(SEG7))   # one page, from $40 on
     # segment 8 (v2.2): whole pages, copied by main to $10000 - 256 * S8PG
     s8img = ORG + len(prg) - 2
+    if S8ORG < EQU["CHSECR"] + 40 * 16:      # the channel secrets sit just under it
+        raise ValueError("segment 8 at $%04X runs into CHSECR" % S8ORG)
     if s8img != syms["S8IMGH"] * 256 or s8img & 0xFF:
         raise ValueError("segment 8 image at $%04X, main copies from $%02X00" % (s8img, syms["S8IMGH"]))
     if s8img + len(SEG8) > 0xD000:

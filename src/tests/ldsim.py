@@ -51,7 +51,9 @@ def screen(m):
         elif 32 <= c < 64 or 91 <= c <= 95: out.append(chr(c))
         # colours and other controls take no column
     return "".join(out)
-def pkt(m, raw, snr4=26, rssi=-97, flat=True):
+def pkt(m, raw, snr4=26, rssi=-97, flat=True, dup=False):
+    if not dup:                                   # unrelated tests: forget earlier packets
+        for i in range(8): m.mem[A("DRC") + i] = 0
     frame(m, bytes([0x88, snr4 & 255, rssi & 255]) + raw)
     m.call("ldpkt")
     s = screen(m)
@@ -165,4 +167,98 @@ check("40 columns: words not split", "Channel msg" in s and "-112 dBm" in s and 
 check("40 columns: via stays with its name", "via Hilltop" in s, s)
 s = msg(m40, bytes([17, 26, 0, 0, 0, 3, 0, 1, 2, 3, 4]) + b"KC9ABC: a much longer message that will need to wrap")
 check("40 columns: long text wraps", all(len(l) <= 39 for l in s.split("\n")) and s.count("\n") >= 2, s)
+# ---- P: hex off whenever the dump opens ----
+mh = machine(80); mh.mem[A("LDHEX")] = 1; mh.mem[A("LDEXIT")] = 1; mh.mem[A("LDSKP")] = 9; mh.call("ldini")
+check("payload hex is off on entry", mh.mem[A("LDHEX")] == 0)
+check("entry: not leaving, nothing skipped", mh.mem[A("LDEXIT")] == 0 and mh.mem[A("LDSKP")] == 0)
+
+# ---- the same packet heard again within ten seconds: one short line ----
+md = machine(80); contacts(md); channel(md, 0, "Public"); md.call("ldini")
+def jiffy(m, t): m.mem[0xA1], m.mem[0xA2] = (t >> 8) & 255, t & 255
+jiffy(md, 1000)
+body = bytes([0xA3, 0x12, 0x34]) + bytes(range(32))
+s = pkt(md, hdr(1, 5) + plen(3) + bytes([0x4F, 0x9C, 0x11]) + body, dup=True)
+check("first time: the full block", s.startswith("--:--:-- Channel msg flood, 3 hops"), s)
+jiffy(md, 1100)
+s = pkt(md, hdr(1, 5) + plen(4) + bytes([0x4F, 0x9C, 0x11, 0x4F]) + body, rssi=-52, dup=True)
+check("again, through another repeater: one line", s == "  heard x2 via Hilltop -52 dBm\n", s)
+jiffy(md, 1500)
+s = pkt(md, hdr(1, 5) + plen(5) + bytes([0x4F, 0x9C, 0x11, 0x4F, 0x11]) + body, dup=True)
+check("and again: x3, via the newest hop", s == "  heard x3 via W9PDS-rpt -97 dBm\n", s)
+s = pkt(md, hdr(1, 5) + plen(3) + bytes([0x4F, 0x9C, 0x11]) + bytes([0xA3, 0x12, 0x35]) + bytes(range(32)), dup=True)
+check("a different payload is a new packet", s.startswith("--:--:-- Channel msg"), s)
+s = pkt(md, hdr(2, 2) + plen(0) + bytes([0x7F, 0x11]) + bytes(18), dup=True)
+s2 = pkt(md, hdr(2, 2) + plen(0) + bytes([0x7F, 0x11]) + bytes(18), dup=True)
+check("a direct repeat: no via", s2 == "  heard x2 -97 dBm\n", s2)
+jiffy(md, 1500 + 601)
+s = pkt(md, hdr(1, 5) + plen(3) + bytes([0x4F, 0x9C, 0x11]) + body, dup=True)
+check("ten seconds on: the full block again", s.startswith("--:--:-- Channel msg"), s)
+jiffy(md, 0x10010)                                 # the jiffy clock's low 16 bits wrap
+pkt(md, hdr(1, 5) + plen(0) + bytes([0xA3, 9, 9]) + bytes(16), dup=True)
+jiffy(md, 0x10020 + 65536 - 0x10010 - 0x10)        # 16 jiffies later, across the wrap
+jiffy(md, (0x10010 + 16) & 0xFFFF)
+s = pkt(md, hdr(1, 5) + plen(0) + bytes([0xA3, 9, 9]) + bytes(16), dup=True)
+check("repeat across the jiffy wrap", s.startswith("  heard x2"), s)
+
+# ---- channel hashes: the secret kept at the scan, hashed on the first visit ----
+import hashlib
+SEC = {0: bytes.fromhex("8b3387e9c5cdea6ac9e5edbaa115cd72"),   # Public's well-known key
+       1: hashlib.sha256(b"#bot").digest()[:16]}
+HASH = {k: hashlib.sha256(v).digest()[0] for k, v in SEC.items()}
+check("#bot's hash byte is CA (as seen on the air)", HASH[1] == 0xCA)
+class Geo:                                          # GeoRAM: a 256-byte window, page / block selects
+    def __init__(self, m):
+        self.pg = self.bk = 0; self.mem = {}
+        m.mem.subscribe_to_write([0xDFFE], lambda a, v: setattr(self, "pg", v))
+        m.mem.subscribe_to_write([0xDFFF], lambda a, v: setattr(self, "bk", v))
+        m.mem.subscribe_to_write(range(0xDE00, 0xDF00), self.wr)
+        m.mem.subscribe_to_read(range(0xDE00, 0xDF00), self.rd)
+    def wr(self, a, v): self.mem[(self.bk, self.pg, a - 0xDE00)] = v
+    def rd(self, a): return self.mem.get((self.bk, self.pg, a - 0xDE00), 0)
+def scan(m, idx, name):                             # CHANNEL_INFO through the real handler
+    channel(m, idx, name)
+    frame(m, bytes([18, idx]) + name.encode().ljust(32, b"\0") + SEC[idx])
+    m.call("chsv")
+for ru, label in ((0, "main RAM"), (2, "GeoRAM")):
+    mc = machine(80); contacts(mc)
+    mc.mem[A("RU")] = ru
+    geo = Geo(mc) if ru == 2 else None
+    scan(mc, 0, "Public"); scan(mc, 1, "#bot")
+    for slot in range(2, 40):                        # the rest of the scan: empty slots, zero keys
+        SEC[slot] = bytes(16)
+        frame(mc, bytes([18, slot]) + bytes(32) + SEC[slot]); mc.call("chsv")
+    if ru == 2:
+        kept = bytes(geo.mem.get((0, 5, 16 + i), 0) for i in range(16))
+        check("GeoRAM: #bot's secret in block 0 page 5 (after the names)", kept == SEC[1], kept.hex())
+        kept33 = bytes(geo.mem.get((0, 7, 16 + i), 0) for i in range(16))
+        check("GeoRAM: slot 33 has its own place (page 7), not slot 1's", kept33 == bytes(16) and kept == SEC[1])
+        check("GeoRAM: main RAM's table untouched", all(mc.mem[A("CHSECR") + 16 + i] == 0 for i in range(16)))
+    else:
+        check("main RAM: #bot's secret at CHSECR + 16", bytes(mc.mem[A("CHSECR") + 16 + i] for i in range(16)) == SEC[1])
+    mc.call("ldini")
+    check(label + ": hashes wanted on entry", mc.mem[A("LDHMORE")] == 1)
+    for i in range(16): mc.mem[A("SECBUF") + i] = 0x50 + i
+    s1 = (mc.call("ldhsh"), screen(mc))[1]
+    s2 = (mc.call("ldhsh"), screen(mc))[1]
+    s3 = (mc.call("ldhsh"), screen(mc))[1]
+    check(label + ": one channel a pass, named", s1 == "-- [Public] is channel %02X --\n" % HASH[0] and s2 == "-- [#bot] is channel CA --\n", (s1, s2))
+    check(label + ": then done", s3 == "" and mc.mem[A("LDHMORE")] == 0, s3)
+    check(label + ": hashes kept", mc.mem[A("CHHASH") + 1] == 0xCA and mc.mem[A("CHHASH")] == HASH[0])
+    check(label + ": SECBUF left as it was", all(mc.mem[A("SECBUF") + i] == 0x50 + i for i in range(16)))
+# packets by channel name, and C
+s = pkt(mc, hdr(1, 5) + plen(0) + bytes([0xCA, 1, 2]) + bytes(32))
+check("a #bot packet says [#bot]", "Channel msg flood, 0 hops" in s and "[#bot]" in s and "channel CA" not in s, s)
+s = pkt(mc, hdr(1, 5) + plen(0) + bytes([0x77, 1, 2]) + bytes(32))
+check("an unknown channel keeps its hash", "channel 77" in s, s)
+def cpress(m):
+    m.call("ldkey", y=67); return screen(m)
+check("C: only the first channel", cpress(mc) == "-- channels: only [Public] --\n")
+check("only Public: #bot packets hidden", pkt(mc, hdr(1, 5) + plen(0) + bytes([0xCA, 1, 2]) + bytes(32)) == "")
+check("only Public: Public packets shown", "[Public]" in pkt(mc, hdr(1, 5) + plen(0) + bytes([HASH[0], 1, 2]) + bytes(32)))
+check("only Public: other types still shown", pkt(mc, adv).startswith("--:--:-- Advert"))
+check("C again: only #bot", cpress(mc) == "-- channels: only [#bot] --\n")
+check("only #bot: Public's text hidden", msg(mc, bytes([17, 26, 0, 0, 0, 3, 0, 1, 2, 3, 4]) + b"a: b") == "")
+check("only #bot: #bot's text shown", msg(mc, bytes([17, 26, 0, 0, 1, 3, 0, 1, 2, 3, 4]) + b"bot: hi") == "  [#bot] bot: hi\n")
+check("only #bot: unknown channels hidden", pkt(mc, hdr(1, 5) + plen(0) + bytes([0x77, 1, 2]) + bytes(32)) == "")
+check("C again: all", cpress(mc) == "-- channels: all --\n" and mc.mem[A("LDCSEL")] == 255)
 print("FAILURES:", bad); sys.exit(1 if bad else 0)
