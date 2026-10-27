@@ -1,3 +1,45 @@
+# MeshCore 64 v2.4
+
+**Start MeshCore 64 from a GeoRAM / NeoRAM with SYS 57000: no disk needed**
+
+- **F1 > Settings > Write app** copies the version you are running onto the card. The line shows what the
+  card holds now: `(card v2.4)`, `(card: none)`, or `(no copy)` if there is nothing to write (a card
+  under 512 KB, or a copy that did not verify). RETURN writes it: the border steps once a page (about 2
+  seconds), every byte is read back, and the launcher is switched on last, so a write that fails never starts.
+- **After that, `SYS 57000` starts MeshCore 64 from the card** after a reset or power-on, with no disk.
+  With a NeoRAM's battery the app and the session both survive a power-off.
+  If something else has used the card since: `POKE 57342,0:POKE 57343,0:SYS 57000`.
+- **Nothing else on the card changes.** At every start MeshCore 64 keeps a scratch copy of itself in the
+  card's top three blocks (about half a second, read back); Write app copies that into blocks 0-2. Your
+  channels, nodes and history (blocks 3 and up) are never touched, so to upgrade you load the new version
+  from disk, choose Write app, and keep your session. Loading a version from disk never changes what
+  SYS 57000 starts until you choose Write app.
+- **Bigger cards keep more history.** Each of the nine history areas holds 512 lines on 512 KB (as before),
+  **1024 on 1 MB, 2048 on 2 MB, 4096 on 4 MB**. Changing the size starts a new session on that card.
+
+**Changed**
+
+- **Data moved up** to make room for the app: it starts at block 3 now, so a card needs 256 KB or more
+  (512 KB for Write app). **Sessions saved by v2.3 or earlier are not restored**: the first start of 2.4
+  on a GeoRAM starts a new session (the node list reloads from the radio). The REU is unchanged.
+- The launcher uses the card's first page, as other GeoRAM software does (NeoRAM-Drive, Maniac Mansion
+  GOLD): only one of them can own SYS 57000 at a time.
+- An Ultimate II+'s own GeoRAM only answers about 0.1 s after the Ultimate starts a program; the startup
+  copy waits up to half a second for it.
+
+Works with either radio firmware: `v1.18.0-c64-5760` (current) or `v1.17.1-c64-5760`.
+
+**Assets**
+
+- `meshcore64-v2.4.prg`, `.d64`, `.crt` (Magic Desk 64K), `.bin` (flat 64K for a 27C512)
+- `meshcore64-ez-v2.4.crt` (EasyFlash)
+- Radio firmware, MeshCore 1.18.0: `firmware-heltec-v3-ble-5760-v1.18.0-c64-5760-merged.bin` (flash at 0x0), `...-app.bin`, and the source patch
+- The previous firmware, MeshCore 1.17.1 (`...v1.17.1-c64-5760...`), and its patch
+
+Radio and client must both be the 5760 versions. Full documentation: README.
+
+---
+
 # MeshCore 64 v2.3
 
 **F1 > Live dump is readable now**

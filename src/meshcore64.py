@@ -146,7 +146,7 @@ EQU = {
     "RU":      0xCF40,   # 1 = an REU is present
     "UKL":     0xCF41,   # size in KB, 16-bit
     "UKH":     0xCF42,
-    "LSHIFT":  0xCF43,   # log2(lines per region): 7, 8 or 9
+    "LSHIFT":  0xCF43,   # log2(lines per region): 7-9 (REU), 8-12 (GeoRAM, v2.4)
     "STRL":    0xCF44,   # region stride, 24-bit
     "STRM":    0xCF45,
     "STRH":    0xCF46,
@@ -323,6 +323,13 @@ main:
 ; into that same RAM.
         lda #54                 ; $36: basic out, kernal and i/o in
         sta 1
+; v2.4: copy the program, still exactly as it loaded, to a scratch area at
+; the top of a GeoRAM, which F1 > Settings > Write app copies to blocks 0-2
+; so SYS 57000 can start it from the card. The routine sits in the padding
+; ($5f40, between the splash bitmap and its colour map) and build() fills
+; in this address; it has to run before the segment copies below change
+; the image.
+gstgo:  jsr $FFFF
 ; Segment 8 (v2.2) goes under the KERNAL first: its image may reach past
 ; $a000, which the segment 2 copy below overwrites. Writes always land in
 ; RAM, so no banking is needed for the copy.
@@ -6450,7 +6457,7 @@ pyastart: .byte 1,0,0,0,0,0,0,0,67,54,52
 pyquery:  .byte 22,3
 pychan:   .byte 31,0
 pytime:   .byte 5
-banner: .text "meshcore 64  v2.3"
+banner: .text "meshcore 64  v2.4"
         .byte 13,0
 svideo: .text "video    "
         .byte 0
@@ -7654,6 +7661,179 @@ dmoff:  lda #0
         sta DMON
         rts
 
+; ===== GeoRAM boot (v2.4): SYS 57000 starts MeshCore 64 from the card =
+; Blocks 0-2 of a GeoRAM: page 0 the launcher, pages 1-165 the program as it
+; loaded, page 166 (block 2 page 38) the launcher's template, which is also
+; the record of what is installed. gstage (in the image's padding, see
+; build) puts a scratch copy of the running program in the top 3 blocks at
+; every start; Write app copies that into blocks 0-2. Nothing else moves.
+; gbsrc: Z set = the scratch copy is good (GBT = its first block)
+gbsrc:  lda GBLKS
+        beq gbs1                ; 0 = 256 blocks
+        cmp #32
+        bcc gbsx1               ; under 512K there is none
+gbs1:   sec
+        sbc #3
+        sta GBT
+        clc
+        adc #2
+        sta GEOBK
+        lda #37
+        sta GEOPG
+        jmp gbchk
+gbsx1:  lda #1
+        rts
+; the Settings value: "(card v2.4)", "(card: none)" or "(no copy)", in A/X
+gbstat: jsr gbsrc
+        bne gbsnc
+        lda #38
+        sta GEOPG
+        lda #2
+        sta GEOBK
+        jsr gbchk
+        bne gbsno
+        ldx #0
+gbsv:   lda GEOWIN+200,x        ; the version after the signature
+        beq gbsv2
+        sta gbver+6,x
+        inx
+        cpx #6
+        bcc gbsv
+gbsv2:  lda #41                 ; )
+        sta gbver+6,x
+        lda #0
+        sta gbver+7,x
+        lda #<gbver
+        ldx #>gbver
+        rts
+gbsno:  lda #<ssnone
+        ldx #>ssnone
+        rts
+gbsnc:  lda #<ssnoc
+        ldx #>ssnoc
+        rts
+; Z set = the window holds "MC64BOOT" at offset 192
+gbchk:  ldx #7
+gbck1:  lda GEOWIN+192,x
+        cmp gbstr,x
+        bne gbck2
+        dex
+        bpl gbck1
+        lda #0
+gbck2:  rts
+; Write app: the scratch copy (166 pages) into blocks 0-2 from page 1, every
+; byte read back, then the launcher. The launcher is off while it writes,
+; so a copy that fails never starts; the border steps once a page.
+gbwr:   jsr gbsrc
+        bne gbwx
+        lda BORDER
+        sta GBBD
+        lda #0
+        sta GEOPG
+        sta GEOBK
+        tax
+gbw0:   sta GEOWIN,x
+        inx
+        bne gbw0
+        lda GBT
+        sta GSB
+        lda #0
+        sta GSP
+        sta GDB
+        lda #1
+        sta GDP
+        lda #166
+        sta GCN
+gbw1:   ldx #0
+gbw2:   lda GSP
+        sta GEOPG
+        lda GSB
+        sta GEOBK
+        lda GEOWIN,x
+        pha
+        lda GDP
+        sta GEOPG
+        lda GDB
+        sta GEOBK
+        pla
+        sta GEOWIN,x
+        cmp GEOWIN,x
+        bne gbwbad
+        inx
+        bne gbw2
+        inc BORDER
+        inc GSP
+        lda GSP
+        cmp #64
+        bne gbw3
+        lda #0
+        sta GSP
+        inc GSB
+gbw3:   inc GDP
+        lda GDP
+        cmp #64
+        bne gbw4
+        lda #0
+        sta GDP
+        inc GDB
+gbw4:   dec GCN
+        bne gbw1
+        ldx #0                  ; the launcher: the template, now page 166
+gbw5:   lda #38
+        sta GEOPG
+        lda #2
+        sta GEOBK
+        lda GEOWIN,x
+        pha
+        lda #0
+        sta GEOPG
+        sta GEOBK
+        pla
+        sta GEOWIN,x
+        inx
+        bne gbw5
+gbwy:   lda GBBD
+        sta BORDER
+gbwx:   rts
+gbwbad: lda #38                 ; a bad copy: no record, no launcher
+        sta GEOPG
+        lda #2
+        sta GEOBK
+        lda #0
+        sta GEOWIN+192
+        beq gbwy
+GBT:    .byte 0
+GSB:    .byte 0
+GSP:    .byte 0
+GDB:    .byte 0
+GDP:    .byte 0
+GCN:    .byte 0
+GBBD:   .byte 0
+gbver:  .text "(card "
+        .byte 0,0,0,0,0,0,0,0
+ssnone: .text "(card: none)"
+        .byte 0
+gbstr:  .byte 77,67,54,52,66,79,79,84   ; "MC64BOOT"
+sstit:  .text " Settings "
+        .byte 0
+sssnd:  .text "Sound       "
+        .byte 0
+sstim:  .text "Timestamps  "
+        .byte 0
+ssgeo:  .text "Write app   "
+        .byte 0
+ssvl:   .byte <ssall,<ssdm,<ssoff,<sson,<ssoff
+ssvh:   .byte >ssall,>ssdm,>ssoff,>sson,>ssoff
+ssall:  .text "all"
+        .byte 0
+ssdm:   .text "DMs"
+        .byte 0
+ssoff:  .text "off"
+        .byte 0
+sson:   .text "on"
+        .byte 0
+ssnoc:  .text "(no copy)"
+        .byte 0
 ; ===== segment 2 strings (ascii; CHROUT shows them as the rest of the ui)
 s2refr: .text "refreshing channels, please wait"
         .byte 13
@@ -7824,7 +8004,7 @@ gdwrap: lda #63
         sta GEOWIN+253
         lda GBLKS
         beq gdbig
-        cmp #8                  ; under 128K is not worth having
+        cmp #16                 ; under 256K: no room for the app copy and the data
         bcs gdbig
 gdno:   lda #0
         sta RU
@@ -7844,17 +8024,26 @@ gdkl:   asl UKL
         rol UKH
         dex
         bne gdkl
-; two blocks are ours (header + channels, contacts); the rest is archive,
-; 9 regions of 2^L lines x 64 bytes: L=9 wants 18 blocks, 8 wants 9, 7 wants 5
+; blocks 0-2 are the app copy (v2.4), 3 and 4 the header + channels and
+; the contacts; the rest is archive, 9 regions of 2^L lines x 64 bytes
+; v2.4: a bigger card gets longer history, not just more free space. L=8
+; wants 9 blocks, 9 wants 18, 10 36, 11 72, 12 144 -- each fits its card
+; after the 5 blocks in front (app copy, header, contacts).
 gdl:    lda GBLKS
-        beq gl9
+        beq gl12                ; 256 blocks: 4 MB, 4096 lines an area
+        cmp #128
+        bcs gl11                ; 2 MB: 2048
+        cmp #64
+        bcs gl10                ; 1 MB: 1024
         cmp #32
-        bcs gl9
-        cmp #16
-        bcs gl8
-        lda #7
+        bcs gl9                 ; 512K: 512
+        lda #8                  ; 256K: 256 (smaller cards are turned down)
         jmp glset
-gl8:    lda #8
+gl12:   lda #12
+        jmp glset
+gl11:   lda #11
+        jmp glset
+gl10:   lda #10
         jmp glset
 gl9:    lda #9
 glset:  jsr rdset               ; MAXL/STRL from LSHIFT, as for an REU
@@ -7881,7 +8070,7 @@ garc:   lda ADRL
         lsr
         ora GBLK
         clc
-        adc #2                  ; past header and contacts
+        adc #5                  ; past the app copy (0-2), header (3) and contacts (4)
         sta GBLK
         rts
 
@@ -7953,6 +8142,7 @@ gcd:    pla
 ; ----- header: block 0 page 0 -----
 ghsel:  lda #0
         sta GEOPG
+        lda #3                  ; v2.4: blocks 0-2 hold the app copy
         sta GEOBK
         rts
 
@@ -8019,9 +8209,10 @@ gsc1:   lda PTR
         lda #>CHNAM
         sta PTRH
         lda #0
-        sta GBLK
         sta GOFF
         sta GDIR
+        lda #3                  ; block 3, after the app copy
+        sta GBLK
         lda #1
         sta GPAG
         lda #<928               ; + the region table (v2.1)
@@ -8066,7 +8257,7 @@ gkset:  lda #0
         sta GOFF
         lda CBASEH
         sta PTRH
-        lda #1
+        lda #4                  ; v2.4: the node table is block 4
         sta GBLK
         lda NCONT               ; x64 (the first block: 138 slots at most)
         cmp #138
@@ -8147,8 +8338,9 @@ grsu:   lda GEOWIN+128,x
         lda #>CHNAM
         sta PTRH
         lda #0
-        sta GBLK
         sta GOFF
+        lda #3                  ; block 3, after the app copy
+        sta GBLK
         lda #1
         sta GPAG
         sta GDIR
@@ -8232,7 +8424,7 @@ bir1:   lda #<srest
         sta PTRH
         jmp prtstr
 
-gsig:   .byte 77,67,54,52,2     ; "MC64", layout 2: 25-char contact names
+gsig:   .byte 77,67,54,52,3     ; "MC64", layout 3: data from block 3 (v2.4)
 sgeo:   .text "georam detected  "
         .byte 0
 srest:  .text ", restored"
@@ -11039,7 +11231,7 @@ chsv:   lda FLEN
         sta PTR
 chsvx:  rts
 ; 16 bytes between RAM at PTR and channel slot A's secret: CSDIR 0 = keep
-; (RAM -> store), 1 = fetch. The store: GeoRAM block 0 pages 5-7 (page 0 is
+; (RAM -> store), 1 = fetch. The store: GeoRAM block 3 pages 5-7 (page 0 is
 ; the header, 1-4 the channel names), the REU's persist pages 64-66 (after
 ; the node table), or main RAM at CHSECR.
 chsxf:  sta CSLOT
@@ -11075,7 +11267,7 @@ chsm1:  lda (SPL),y
 chsm2:  dey
         bpl chsm
         rts
-chsg:   lda #0
+chsg:   lda #3                  ; v2.4: block 3
         sta GEOBK
         lda CSHI
         clc
@@ -12230,7 +12422,17 @@ spdraw: jsr plinit
         tax
         jsr spval
         jsr plend
-        lda #147
+        lda RU                  ; v2.4: Write app, with a GeoRAM only
+        cmp #2
+        bne spdr3
+        jsr plnew
+        lda #<ssgeo
+        ldx #>ssgeo
+        jsr sppl
+        jsr gbstat              ; what the card has now
+        jsr sppl
+        jsr plend
+spdr3:  lda #147
         jsr CHROUT
         lda #7
         sta MNX
@@ -12263,10 +12465,14 @@ sp0:    stx OFFSND
         lda #16                 ; let it be heard
         jsr sndmsg
         jmp spsv
-sp1:    lda NOTS
+sp1:    cmp #1
+        bne sp2
+        lda NOTS
         eor #1
         sta NOTS
 spsv:   jsr gsvh                ; kept with the session (REU / GeoRAM)
+        jmp spdraw
+sp2:    jsr gbwr
         jmp spdraw
 spdone: lda #0
         sta UIMODE
@@ -12286,22 +12492,6 @@ tswdn:  .byte 212,72,85,198,82,73,211,65,84,211,85,78,205,79,78,212,85,69,215,69
 tsmon:  .byte 202,65,78,198,69,66,205,65,82,193,80,82,205,65,89,202,85,78
         .byte 202,85,76,193,85,71,211,69,80,207,67,84,206,79,86,196,69,67
 miset:  .text "Settings"
-        .byte 0
-sstit:  .text " Settings "
-        .byte 0
-sssnd:  .text "Sound      "
-        .byte 0
-sstim:  .text "Timestamps "
-        .byte 0
-ssvl:   .byte <ssall,<ssdm,<ssoff,<sson,<ssoff
-ssvh:   .byte >ssall,>ssdm,>ssoff,>sson,>ssoff
-ssall:  .text "all"
-        .byte 0
-ssdm:   .text "DMs"
-        .byte 0
-ssoff:  .text "off"
-        .byte 0
-sson:   .text "on"
         .byte 0
 TSFL:   .byte 0
 TSLEN:  .byte 0
@@ -15294,6 +15484,230 @@ def assemble4(src1, src2, src3, src4):
         prev = (code1, code2, code3, code4, code5, code6, code7, code8)
     raise ValueError("segments did not settle")
 
+# ===== GeoRAM boot (v2.4) ==============================================
+# SYS 57000 jumps to $dea8, which on a GeoRAM is offset $a8 of the selected
+# page: with block 0 page 0 selected (as after a reset), the launcher page.
+# Its code at $de00 copies the loader to the cassette buffer (the window
+# changes under it once pages are switched), and the loader brings pages
+# 1..NPG of blocks 0-2 back to $0801 and RUNs the program as LOAD+RUN would.
+GBVER = "v2.4"
+GBSTUB = r"""
+        lda #$01
+        sta $FB
+        lda #$08
+        sta $FC
+        lda #1
+        sta $FD
+        lda #0
+        sta $FE
+        ldx #NPG
+lpg:    lda $FD
+        sta $DFFE
+        lda $FE
+        sta $DFFF
+        ldy #0
+lby:    lda $DE00,y
+        sta ($FB),y
+        iny
+        bne lby
+        inc $FC
+        inc $FD
+        lda $FD
+        cmp #64
+        bne lnx
+        lda #0
+        sta $FD
+        inc $FE
+lnx:    dex
+        bne lpg
+        lda #0
+        sta $DFFE
+        sta $DFFF
+        lda #<PEND
+        sta $2D
+        sta $AE
+        lda #>PEND
+        sta $2E
+        sta $AF
+        cli
+        jsr $A659
+        jmp $A7AE
+"""
+GBKICK = r"""
+        sei
+        ldx #0
+kcp:    lda $DE20,x
+        sta $0340,x
+        inx
+        cpx #STUBLEN
+        bne kcp
+        jmp $0340
+"""
+# The startup copy (v2.4). Runs first thing in main (gstgo), with BASIC
+# banked out (so $a000-$acff reads the image and not the ROM) and the
+# KERNAL's IRQ still ticking the jiffy clock it waits on. It goes to a
+# scratch copy in the card's top three blocks, which no data uses on 512K
+# and up -- never to blocks 0-2: F1 > Settings > Write app puts it there
+# when asked. Every byte is read back; the record (the template, page 165
+# of the scratch copy) is cleared first and written only after a clean copy.
+GBSTORG = 0x5F40
+GBSTAGE = r"""
+gstage: lda geook
+        beq gsx
+        lda $A2             ; an Ultimate's GeoRAM answers only ~0.1 s after
+        clc                 ; it starts a program: keep asking for 0.5 s
+        adc #30
+        sta $FB
+gst2:   lda #63
+        sta $DFFE
+        lda #0
+        sta $DFFF
+        lda $DEFD
+        sta $0334
+        lda #165
+        sta $DEFD
+        cmp $DEFD
+        bne gst3
+        lda #90
+        sta $DEFD
+        cmp $DEFD
+        beq gst4
+gst3:   lda $0334
+        sta $DEFD
+        lda $A2
+        cmp $FB
+        bne gst2
+gsx:    rts
+gst4:   lda #62             ; the page register must select other memory
+        sta $DFFE
+        lda $DEFD
+        sta $0335
+        lda #195
+        sta $DEFD
+        lda #63
+        sta $DFFE
+        lda $DEFD
+        cmp #90
+        bne gsrst
+        lda #1              ; size: mark block N, look at block 0
+        sta $FE
+gsz:    lda $FE
+        sta $DFFF
+        lda $DEFD
+        pha
+        lda #195
+        sta $DEFD
+        lda #0
+        sta $DFFF
+        lda $DEFD
+        cmp #90
+        bne gszw
+        lda $FE
+        sta $DFFF
+        pla
+        sta $DEFD
+        asl $FE
+        bne gsz
+        beq gsbig
+gszw:   pla                 ; block N is block 0: put its marker back
+        sta $DEFD
+gsbig:  lda $FE             ; blocks, 0 = 256
+        beq gsok
+        cmp #32
+        bcc gsrst           ; under 512K: no room for the scratch copy
+gsok:   sec
+        sbc #3
+        sta $FE             ; the top three blocks
+        clc
+        adc #2
+        sta $DFFF
+        lda #37             ; its record (page 165) goes first: a copy
+        sta $DFFE           ; that fails leaves none
+        lda #0
+        sta $DEC0
+        sta $FD
+        lda #$01
+        sta $FB
+        lda #$08
+        sta $FC
+        ldx #NPG
+gsl:    lda $FD
+        sta $DFFE
+        lda $FE
+        sta $DFFF
+        ldy #0
+gsc:    lda ($FB),y
+        sta $DE00,y
+        cmp $DE00,y
+        bne gsrst
+        iny
+        bne gsc
+        inc $FC
+        jsr gsnp
+        dex
+        bne gsl
+        lda $FD
+        sta $DFFE
+        lda $FE
+        sta $DFFF
+        ldy #0
+gst:    lda tpl,y
+        sta $DE00,y
+        cmp $DE00,y
+        bne gsrst
+        iny
+        bne gst
+gsrst:  lda #62             ; put back what the tests changed in block 0
+        sta $DFFE
+        lda #0
+        sta $DFFF
+        lda $0335
+        sta $DEFD
+        lda #63
+        sta $DFFE
+        lda $0334
+        sta $DEFD
+        lda #0
+        sta $DFFE
+        rts
+gsnp:   inc $FD
+        lda $FD
+        cmp #64
+        bne gsnp1
+        lda #0
+        sta $FD
+        inc $FE
+gsnp1:  rts
+tpl:
+"""
+
+
+def georam_boot(prg, syms):
+    """Put the launcher template and the startup copy into the image."""
+    prg = bytearray(prg)
+    n = len(prg) - 2
+    npg = (n + 255) // 256
+    if npg > 165:       # page 166 (block 2 page 38) is the template; 3 blocks in all
+        raise ValueError("image is %d pages: the GeoRAM app copy holds 165" % npg)
+    stub, _ = assemble(GBSTUB, 0x0340, {"NPG": npg, "PEND": ORG + n})
+    kick, _ = assemble(GBKICK, 0xDE00, {"STUBLEN": len(stub)})
+    if len(kick) > 0x20 or len(stub) > 0xA8 - 0x20:
+        raise ValueError("GeoRAM launcher: kick %d, loader %d bytes" % (len(kick), len(stub)))
+    tpl = bytearray(256)
+    tpl[:len(kick)] = kick
+    tpl[0x20:0x20 + len(stub)] = stub
+    tpl[0xA8:0xAB] = b"\x4c\x00\xde"            # SYS 57000
+    sig = b"MC64BOOT" + GBVER.encode() + b"\0"
+    tpl[0xC0:0xC0 + len(sig)] = sig
+    src = GBSTAGE + "\n".join("        .byte " + ",".join(str(b) for b in tpl[i:i + 16])
+                              for i in range(0, 256, 16)) + "\n"
+    stg, _ = assemble(src, GBSTORG, {"geook": syms["geook"], "NPG": npg})
+    a = GBSTORG - ORG + 2
+    if GBSTORG + len(stg) > EQU["BMCOL"] or any(prg[a:a + len(stg)]):
+        raise ValueError("GeoRAM startup copy does not fit the padding at $%04X" % GBSTORG)
+    prg[a:a + len(stg)] = stg
+    return bytes(prg)
+
 
 def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
           latadj=125, nogeo=0):
@@ -15362,6 +15776,8 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
         code[syms["bitpal"] - ORG + i] = v
     for name, val in vals:
         code[syms[name] - ORG] = val
+    code[syms["gstgo"] - ORG + 1] = GBSTORG & 0xFF      # main's jsr to the startup copy
+    code[syms["gstgo"] - ORG + 2] = GBSTORG >> 8
     # Segment 2 rides directly behind segment 1 and is copied to $a000 at
     # startup. While loaded it sits on top of $4000, which is fine -- that
     # is splash/archive RAM nothing touches before the copy -- but it must
@@ -15411,6 +15827,7 @@ def build(ctrl=DEFAULT_CTRL, out=OUT, blank=0, clock=PAL, testk=0,
     if s8img + len(SEG8) > 0xD000:
         raise ValueError("segment 8 image runs to $%04X, into I/O" % (s8img + len(SEG8)))
     prg += SEG8
+    prg = georam_boot(prg, syms)
     with open(out, "wb") as f:
         f.write(prg)
     return code, syms, prg, bit, half

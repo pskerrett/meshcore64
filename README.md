@@ -1,7 +1,7 @@
 # MeshCore 64
 
 **A Commodore 64 chat client for the [MeshCore](https://github.com/meshcore-dev/MeshCore) LoRa mesh.**
-Version 2.3. Machine language, 5760 baud, all of it running on a stock C64.
+Version 2.4. Machine language, 5760 baud, all of it running on a stock C64.
 
 <p align="center"><img src="docs/images/meshcore64-demo.gif" alt="MeshCore 64 in action" width="768"></p>
 
@@ -16,7 +16,7 @@ It also makes good use of the extras a well-equipped C64 may have:
 | | add-on | what MeshCore 64 does with it |
 |---|---|---|
 | <img src="docs/images/addon-reu1750.jpg" width="170"> | **REU** (1700 / 1750 / 1764, or the Ultimate II+'s REU) | Message history for every channel, scrollback with F5, the node and channel lists cached, and the whole session **restored after a reset** |
-| <img src="docs/images/addon-neoram.jpg" width="90"> | **GeoRAM / NeoRAM** | Everything the REU does. A **NeoRAM has a battery**, so history, channel list and node lists survive a power-off too |
+| <img src="docs/images/addon-neoram.jpg" width="90"> | **GeoRAM / NeoRAM** | Everything the REU does, with longer history on bigger cards. A **NeoRAM has a battery**, so history, channel list and node lists survive a power-off too, and MeshCore 64 can **start from the card with `SYS 57000`**, no disk needed |
 | <img src="docs/images/addon-kawari.jpg" width="150"> | **VIC-II Kawari** | **80-column mode**: detected at start (with a short countdown you can cancel), every screen and menu in 80 columns, F3 swaps between 40 and 80 |
 | <img src="docs/images/addon-ultimate.jpg" width="170"> | **Ultimate II+** (real-time clock) | Reads the clock at start, learns your time zone from the mesh, and **sets the radio's clock** when it is behind. Stats shows the offset |
 
@@ -73,6 +73,21 @@ The radio firmware is unchanged (5760 baud). Each release adds its own *New feat
   else in main RAM.
 - **P (payload)** is off whenever the dump opens; it marks encrypted payloads as encrypted and shows their bytes as hex only, without a column of noise.
 - **Fixed:** SNR decimals were wrong (6.0 showed as 6.3, 6.5 as 6.8).
+
+## New features v2.4
+
+**Start MeshCore 64 from a GeoRAM / NeoRAM with `SYS 57000`: no disk needed.**
+
+- **F1 > Settings > Write app** copies the version you are running onto the card (about 2 seconds,
+  every byte read back). The line shows what the card holds: `(card v2.4)`, `(card: none)`, or
+  `(no copy)` when there is nothing to write (a card under 512 KB). After that, **`SYS 57000`** starts it
+  after a reset or power-on. See [Start from a GeoRAM](#start-from-a-georam-or-neoram).
+- **Upgrades keep your session.** Write app only touches the app's own blocks, never your channels,
+  nodes or history: load a new version from disk, choose Write app, done.
+- **Bigger cards keep more history.** Each history area holds 512 lines on 512 KB, **1024 on 1 MB,
+  2048 on 2 MB and 4096 on 4 MB**.
+- **Changed:** the GeoRAM data moved up three blocks to make room for the app, so a session saved by
+  v2.3 or earlier starts fresh on the first start of 2.4 (the REU is unchanged).
 
 ---
 
@@ -163,6 +178,7 @@ just steps to the next channel, so you can cycle through them all.
 **F5** scrolls back through everything the REU or GeoRAM has kept (the border turns red while you
 are in history); F5 again goes further back, F7 comes forward, any other key returns to live.
 After a reset the history is still there: the start screen says "REU detected ... restored".
+On a GeoRAM each area holds 512 lines on 512 KB, 1024 on 1 MB, 2048 on 2 MB and 4096 on 4 MB.
 Every channel and DM conversation that gets messages has its own history; up to eight are kept
 at a time, and when a ninth needs room the one that has been quiet longest is recycled.
 
@@ -196,6 +212,10 @@ forever until it is full, so this is how you keep the list tidy.
 **Sound**: `all` (every message), `DMs` (direct messages only) or `off`. **Timestamps**: `on` or
 `off`. RETURN changes the highlighted one (changing the sound plays it); they are kept with the
 saved session on an REU or GeoRAM.
+
+**Write app** (with a GeoRAM or NeoRAM only) is an action, not a setting: RETURN copies the running
+version onto the card so `SYS 57000` starts it, and the line then shows `(card v2.4)`. See
+[Start from a GeoRAM](#start-from-a-georam-or-neoram).
 
 ### Add a channel
 
@@ -240,29 +260,50 @@ that still works. MeshCore 64 reads the channels that are on the radio and can a
 
 | file | how |
 |---|---|
-| `meshcore64-v2.3.prg` | load it from anything: an Ultimate, SD2IEC, `LOAD"*",8,1` and `RUN` |
-| `meshcore64-v2.3.d64` | a disk image: `LOAD"MESHCORE64",8` then `RUN` |
-| `meshcore64-v2.3.crt` | a cartridge image (Magic Desk, 64K): runs the moment you switch on |
-| `meshcore64-v2.3.bin` | the same cartridge as a flat 64K image for a **27C512** EPROM |
-| `meshcore64-ez-v2.3.crt` | **MeshCore 64 EZ**: the same program on an **EasyFlash** cartridge ([details](#meshcore-64-ez-easyflash)) |
+| `meshcore64-v2.4.prg` | load it from anything: an Ultimate, SD2IEC, `LOAD"*",8,1` and `RUN` |
+| `meshcore64-v2.4.d64` | a disk image: `LOAD"MESHCORE64",8` then `RUN` |
+| `meshcore64-v2.4.crt` | a cartridge image (Magic Desk, 64K): runs the moment you switch on |
+| `meshcore64-v2.4.bin` | the same cartridge as a flat 64K image for a **27C512** EPROM |
+| `meshcore64-ez-v2.4.crt` | **MeshCore 64 EZ**: the same program on an **EasyFlash** cartridge ([details](#meshcore-64-ez-easyflash)) |
 
 The cartridge copies the program into RAM and starts it, so after that it is the same program.
 Every format is **the same program**: the PRG, the D64, both cartridge images and the EasyFlash image all
 carry identical bytes, and all of them look for an REU and for a GeoRAM or NeoRAM at start (tested in VICE: the
 PRG, D64 and Magic Desk cartridge detect both). The cartridge is only a different way to deliver it.
 
+### Start from a GeoRAM or NeoRAM
+
+With a GeoRAM or NeoRAM of **512 KB or more**, MeshCore 64 can live on the card and start without a disk:
+
+1. Load MeshCore 64 any way you like (disk, PRG, cartridge) and let it connect.
+2. **F1 > Settings > Write app**, RETURN. The border flickers for about 2 seconds while it copies
+   and checks every byte; the line then says `(card v2.4)`.
+3. From then on, after a reset or power-on: **`SYS 57000`**. On a NeoRAM the battery keeps the app
+   and your session through a power-off.
+
+To upgrade, load the new version from disk and choose Write app again: it replaces only the app, and
+your channels, nodes and history stay. Loading a version from disk does not change what `SYS 57000`
+starts until you choose Write app.
+
+How it fits on the card: blocks 0-2 (48 KB) hold the launcher and the app; the session (header,
+channels, nodes, history) starts at block 3; and at every start MeshCore 64 keeps a scratch copy of
+itself in the card's top three blocks, which is what Write app copies from. The launcher sits on the
+card's first page, as other GeoRAM software does (NeoRAM-Drive, Maniac Mansion GOLD), so only one of
+them owns `SYS 57000` at a time. If something else has selected another page since the reset, use
+`POKE 57342,0:POKE 57343,0:SYS 57000`.
+
 ### Making a cartridge
 
-**Ultimate II+ and similar:** copy `meshcore64-v2.3.crt` to the device and run it. Nothing to build.
+**Ultimate II+ and similar:** copy `meshcore64-v2.4.crt` to the device and run it. Nothing to build.
 
-**Your own EPROM cartridge:** burn `meshcore64-v2.3.bin` to a **27C512** (64K). It is one flat image,
+**Your own EPROM cartridge:** burn `meshcore64-v2.4.bin` to a **27C512** (64K). It is one flat image,
 the eight 8K banks end to end, and the unused tail is `$FF` (erased state). The `.crt` is the same
 contents in the container emulators expect: it is **Magic Desk** (cartridge type 19), so VICE
-runs it too (`x64sc -cartcrt meshcore64-v2.3.crt`).
+runs it too (`x64sc -cartcrt meshcore64-v2.4.crt`).
 
 | | |
 |---|---|
-| ROM | 27C512, 64K. About 41K is used (banks 0-4); the rest is `$FF` |
+| ROM | 27C512, 64K. About 42K is used (banks 0-5); the rest is `$FF` |
 | Maps at | `$8000`-`$9FFF`, one 8K bank at a time |
 | Bank register | write `$DE00`: low bits = bank, **bit 7 = switch the cartridge off** |
 | `/EXROM` (edge pin 9) | tied **low** |
@@ -289,14 +330,14 @@ the program.
 
 ### MeshCore 64 EZ (EasyFlash)
 
-**`meshcore64-ez-v2.3.crt`** is MeshCore 64 2.3 for an **EasyFlash** cartridge (CRT type 32), such as an
+**`meshcore64-ez-v2.4.crt`** is MeshCore 64 2.4 for an **EasyFlash** cartridge (CRT type 32), such as an
 EasyFlash 3, or for an Ultimate II+ running an EasyFlash cartridge image. It is the same program,
 byte for byte, as the cartridge build above; only the cartridge wrapper differs. Nothing in the
 program changed and it never writes to the flash.
 
 - **Ultimate II+:** run the `.crt` from its menu.
 - **EasyFlash 3:** write the `.crt` to the cartridge with EasyProg (or any tool that programs EasyFlash
-  `.crt` files). It uses ROML banks 0-4 for the program and ROMH bank 0 for the boot code, leaving the
+  `.crt` files). It uses ROML banks 0-5 for the program and ROMH bank 0 for the boot code, leaving the
   rest of the 1 MB free.
 - **How it starts:** reset boots in Ultimax mode from ROMH bank 0, which switches to 8K mode and lets the
   KERNAL autostart the stub in ROML bank 0. The stub copies the program into RAM, switches the cartridge
@@ -345,7 +386,7 @@ Everything is built by Python scripts; there are no other dependencies than VICE
 `c1541` for the cartridge and disk images.
 
 ```bash
-src/build.sh            # -> release/meshcore64-v2.3.{prg,crt,bin,d64}; byte-identical to the published files
+src/build.sh            # -> release/meshcore64-v2.4.{prg,crt,bin,d64}; byte-identical to the published files
 pip install py65
 src/tests/run-sims.sh   # the 6502 simulator suites
 ```
@@ -363,6 +404,8 @@ with its own assembler; it is laid out in seven code areas that fit the C64's 64
   stays at 0-2 per run.
 - 6502 simulators for the receiver timing, the menus, 80-column reflow, routes, F7, the purge, the stats,
   timestamps and the alert, and the history regions across restarts (with GeoRAM and REU models).
+- GeoRAM boot (v2.4): Write app and `SYS 57000` on a 512 KB and a 2 MB card in VICE, including an
+  upgrade over an older copy that keeps the session; an earlier test build of it on a real Ultimate II+ GeoRAM.
 
 Known limits: the 80-column mode needs a Kawari whose firmware has its 80-column mode (the same one Novaterm's
 80-column driver uses). A message at the full 135 characters may be refused by the radio; the client

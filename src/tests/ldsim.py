@@ -228,9 +228,9 @@ for ru, label in ((0, "main RAM"), (2, "GeoRAM")):
         SEC[slot] = bytes(16)
         frame(mc, bytes([18, slot]) + bytes(32) + SEC[slot]); mc.call("chsv")
     if ru == 2:
-        kept = bytes(geo.mem.get((0, 5, 16 + i), 0) for i in range(16))
-        check("GeoRAM: #bot's secret in block 0 page 5 (after the names)", kept == SEC[1], kept.hex())
-        kept33 = bytes(geo.mem.get((0, 7, 16 + i), 0) for i in range(16))
+        kept = bytes(geo.mem.get((3, 5, 16 + i), 0) for i in range(16))
+        check("GeoRAM: #bot's secret in block 3 page 5 (after the names; v2.4)", kept == SEC[1], kept.hex())
+        kept33 = bytes(geo.mem.get((3, 7, 16 + i), 0) for i in range(16))
         check("GeoRAM: slot 33 has its own place (page 7), not slot 1's", kept33 == bytes(16) and kept == SEC[1])
         check("GeoRAM: main RAM's table untouched", all(mc.mem[A("CHSECR") + 16 + i] == 0 for i in range(16)))
     else:
